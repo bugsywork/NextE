@@ -25,9 +25,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Supabase Configuration (from your credentials.py)
-SUPABASE_URL = "https://genegmnaabhklzxropoz.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlbmVnbW5hYWJoa2x6eHJvcG96Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzYzNTQxNDUsImV4cCI6MjA1MTkzMDE0NX0.hN_wu7D_LaQDkgs0wx_solarman_token_here"  # Add your real key here
+# Supabase Configuration - Read from Streamlit Secrets
+try:
+    SUPABASE_URL = st.secrets["supabase"]["url"]
+    SUPABASE_KEY = st.secrets["supabase"]["key"]
+except Exception as e:
+    st.error(f"⚠️ Secrets not configured! Go to Settings → Secrets and add Supabase credentials")
+    st.stop()
 
 
 # ============================================================================
