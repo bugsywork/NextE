@@ -25,8 +25,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-SUPABASE_URL = "https://cbickccjxdyun6jdq88evn.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiaWNrY2NqeGR5dW42amRxODhldm4iLCJyb2xlIjoiYW5vbiIsImlhdCI6MTczNjk1MDc5MiwiZXhwIjoyMDUyNTI2NzkyfQ.Z3vDYSHTXu5QhqpUZe5_lFhQb6OTL7EqMDNWdOJVY18"
+# Supabase Configuration (from your credentials.py)
+SUPABASE_URL = "https://genegmnaabhklzxropoz.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlbmVnbW5hYWJoa2x6eHJvcG96Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzYzNTQxNDUsImV4cCI6MjA1MTkzMDE0NX0.hN_wu7D_LaQDkgs0wx_solarman_token_here"  # Add your real key here
 
 
 # ============================================================================
