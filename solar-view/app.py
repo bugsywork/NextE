@@ -6,7 +6,7 @@ Streamlit app showing real-time status from Supabase
 import streamlit as st
 from datetime import datetime
 import plotly.graph_objects as go
-import time
+from streamlit_autorefresh import st_autorefresh
 
 try:
     from supabase import create_client
@@ -26,25 +26,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Auto-refresh every 60 seconds
-st_autorefresh_interval = 60 * 1000  # 60 seconds in milliseconds
-
-# Add auto-refresh component
-st.markdown(
-    f"""
-    <script>
-        setTimeout(function(){{
-            window.location.reload();
-        }}, {st_autorefresh_interval});
-    </script>
-    """,
-    unsafe_allow_html=True
-)
+# Auto-refresh every 60 seconds (60000 milliseconds)
+st_autorefresh(interval=60 * 1000, key="dashboard_refresh")
 
 # Supabase Configuration - Read from Streamlit Secrets
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
-    SUPABASE_KEY = st.secrets["supabase"]["key"]  # Changed from "key" to "anon_key"
+    SUPABASE_KEY = st.secrets["supabase"]["key"]  # Using "key" as in your secrets
 except Exception as e:
     st.error(f"⚠️ Secrets not configured! Go to Settings → Secrets and add Supabase credentials")
     st.write(f"Error: {e}")
@@ -86,8 +74,11 @@ def get_status_from_supabase():
         if not plants_result.data:
             return None, [], "No plant data found"
         
-        # Parse timestamp
+        # Parse timestamp and convert to Bucharest timezone
+        from zoneinfo import ZoneInfo
         timestamp = datetime.fromisoformat(latest_ts.replace('Z', '+00:00'))
+        bucharest_tz = ZoneInfo("Europe/Bucharest")
+        timestamp = timestamp.astimezone(bucharest_tz)
         
         # Format plants data
         plants = []
@@ -183,8 +174,10 @@ def main():
         )
     
     # Last update time
+    from zoneinfo import ZoneInfo
+    bucharest_now = datetime.now(ZoneInfo("Europe/Bucharest"))
     st.caption(f"📅 Last update from Supabase: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
-    st.caption(f"🔄 Page refreshed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    st.caption(f"🔄 Page refreshed at: {bucharest_now.strftime('%Y-%m-%d %H:%M:%S')}")
     
     # ========================================================================
     # PIE CHART - STATUS DISTRIBUTION

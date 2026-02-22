@@ -2,3 +2,4 @@ streamlit
 supabase
 plotly
 python-dateutil
+streamlit-autorefresh
