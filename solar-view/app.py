@@ -44,7 +44,7 @@ st.markdown(
 # Supabase Configuration - Read from Streamlit Secrets
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
-    SUPABASE_KEY = st.secrets["supabase"]["anon_key"]  # Changed from "key" to "anon_key"
+    SUPABASE_KEY = st.secrets["supabase"]["key"]  # Changed from "key" to "anon_key"
 except Exception as e:
     st.error(f"⚠️ Secrets not configured! Go to Settings → Secrets and add Supabase credentials")
     st.write(f"Error: {e}")
