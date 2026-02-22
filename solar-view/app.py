@@ -173,7 +173,9 @@ def main():
         )
     
     # Last update time (both in Bucharest timezone)
-    bucharest_now = datetime.now()  # Server is in UTC, but we display local time
+    from zoneinfo import ZoneInfo
+    bucharest_tz = ZoneInfo("Europe/Bucharest")
+    bucharest_now = datetime.now(bucharest_tz)
     st.caption(f"📅 Last update from Supabase: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
     st.caption(f"🔄 Page refreshed at: {bucharest_now.strftime('%Y-%m-%d %H:%M:%S')}")
     
