@@ -183,7 +183,8 @@ def main():
         )
     
     # Last update time
-    st.caption(f"🕐 Last updated: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+    st.caption(f"📅 Last update from Supabase: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+    st.caption(f"🔄 Page refreshed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # ========================================================================
     # PIE CHART - STATUS DISTRIBUTION
