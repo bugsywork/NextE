@@ -6,6 +6,7 @@ Streamlit app showing real-time status from Supabase
 import streamlit as st
 from datetime import datetime
 import plotly.graph_objects as go
+import time
 
 try:
     from supabase import create_client
@@ -25,12 +26,28 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Auto-refresh every 60 seconds
+st_autorefresh_interval = 60 * 1000  # 60 seconds in milliseconds
+
+# Add auto-refresh component
+st.markdown(
+    f"""
+    <script>
+        setTimeout(function(){{
+            window.location.reload();
+        }}, {st_autorefresh_interval});
+    </script>
+    """,
+    unsafe_allow_html=True
+)
+
 # Supabase Configuration - Read from Streamlit Secrets
 try:
     SUPABASE_URL = st.secrets["supabase"]["url"]
-    SUPABASE_KEY = st.secrets["supabase"]["key"]
+    SUPABASE_KEY = st.secrets["supabase"]["anon_key"]  # Changed from "key" to "anon_key"
 except Exception as e:
     st.error(f"⚠️ Secrets not configured! Go to Settings → Secrets and add Supabase credentials")
+    st.write(f"Error: {e}")
     st.stop()
 
 
@@ -38,7 +55,7 @@ except Exception as e:
 # DATA FETCHING
 # ============================================================================
 
-@st.cache_data(ttl=60)  # Cache for 1 minut
+@st.cache_data(ttl=60)  # Cache for 60 seconds (matches auto-refresh)
 def get_status_from_supabase():
     """Fetch latest status from Supabase solar_plants_status table"""
     
@@ -311,7 +328,7 @@ def main():
     # ========================================================================
     
     st.markdown("---")
-    st.caption("🔄 Auto-refreshes every minut | Data from Supabase")
+    st.caption("🔄 Auto-refreshes every 60 seconds | Data from Supabase")
 
 
 # ============================================================================
