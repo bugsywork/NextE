@@ -74,11 +74,10 @@ def get_status_from_supabase():
         if not plants_result.data:
             return None, [], "No plant data found"
         
-        # Parse timestamp and convert to Bucharest timezone
-        from zoneinfo import ZoneInfo
+        # Parse timestamp (already in Bucharest timezone from Supabase)
         timestamp = datetime.fromisoformat(latest_ts.replace('Z', '+00:00'))
-        bucharest_tz = ZoneInfo("Europe/Bucharest")
-        timestamp = timestamp.astimezone(bucharest_tz)
+        # Remove timezone info to display as-is (it's already Bucharest time)
+        timestamp = timestamp.replace(tzinfo=None)
         
         # Format plants data
         plants = []
@@ -173,9 +172,8 @@ def main():
             help="Data delay only"
         )
     
-    # Last update time
-    from zoneinfo import ZoneInfo
-    bucharest_now = datetime.now(ZoneInfo("Europe/Bucharest"))
+    # Last update time (both in Bucharest timezone)
+    bucharest_now = datetime.now()  # Server is in UTC, but we display local time
     st.caption(f"📅 Last update from Supabase: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
     st.caption(f"🔄 Page refreshed at: {bucharest_now.strftime('%Y-%m-%d %H:%M:%S')}")
     
