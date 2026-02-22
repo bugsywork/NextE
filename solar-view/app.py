@@ -38,7 +38,7 @@ except Exception as e:
 # DATA FETCHING
 # ============================================================================
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=60)  # Cache for 1 minut
 def get_status_from_supabase():
     """Fetch latest status from Supabase solar_plants_status table"""
     
@@ -311,7 +311,7 @@ def main():
     # ========================================================================
     
     st.markdown("---")
-    st.caption("🔄 Auto-refreshes every 5 minutes | Data from Supabase")
+    st.caption("🔄 Auto-refreshes every minut | Data from Supabase")
 
 
 # ============================================================================
