@@ -5,10 +5,12 @@ Enhanced monitoring: staleness alerts, delta metrics, delay visibility, search
 """
 
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 from zoneinfo import ZoneInfo
+import requests
+import xml.etree.ElementTree as ET
 
 try:
     from supabase import create_client
@@ -115,36 +117,109 @@ def count_severity(plants_list, severity):
 
 
 # ============================================================================
-# CURTAILMENT HELPERS
+# SEN DATA FETCHING (sistemulenergetic.ro)
 # ============================================================================
 
-@st.cache_data(ttl=30)
-def get_curtail_status():
+@st.cache_data(ttl=120)
+def get_sen_realtime():
+    """Fetch latest SEN data from sistemulenergetic.ro"""
     try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        result = supabase.table('curtail_commands')\
-            .select('*')\
-            .order('created_at', desc=True)\
-            .limit(1)\
-            .execute()
-        if result.data:
-            return result.data[0]
-        return None
-    except Exception:
-        return None
+        bucharest_tz = ZoneInfo("Europe/Bucharest")
+        now = datetime.now(bucharest_tz)
+        start = now - timedelta(hours=2)
 
+        url = (
+            f"https://www.sistemulenergetic.ro/statistics/stream/xml/"
+            f"{start.year}/{start.month}/{start.day}/{start.hour}/{start.minute}/"
+            f"{now.year}/{now.month}/{now.day}/{now.hour}/{now.minute}"
+        )
 
-def send_curtail_command(action: str, plants: list = None):
-    try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        payload = {"status": "pending", "action": action, "kw": 0}
-        if plants:
-            payload["plants"] = plants
-        supabase.table('curtail_commands').insert(payload).execute()
-        return True
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+
+        # Parse timestamps
+        times = {}
+        series = root.find("series")
+        if series is not None:
+            for v in series.findall("value"):
+                xid = v.get("xid")
+                if v.text:
+                    times[xid] = v.text.strip()
+
+        if not times:
+            return None, "Nu s-au găsit date", []
+
+        # Latest xid
+        max_xid = max(times.keys(), key=lambda x: int(x))
+
+        # Build latest row
+        latest = {"date": times[max_xid]}
+        for graph in root.findall("graph"):
+            title = graph.get("title")
+            for v in graph.findall("value"):
+                if v.get("xid") == max_xid:
+                    txt = v.text.strip() if v.text else None
+                    latest[title] = float(txt) if txt else None
+
+        # Build all rows for chart
+        all_rows = []
+        for xid, dt_str in sorted(times.items(), key=lambda x: int(x[0])):
+            r = {"date": dt_str}
+            for graph in root.findall("graph"):
+                title = graph.get("title")
+                for v in graph.findall("value"):
+                    if v.get("xid") == xid:
+                        txt = v.text.strip() if v.text else None
+                        r[title] = float(txt) if txt else None
+            all_rows.append(r)
+
+        return latest, None, all_rows
+
     except Exception as e:
-        st.error(f"Eroare: {e}")
-        return False
+        return None, f"Eroare SEN: {str(e)}", []
+
+
+@st.cache_data(ttl=300)
+def get_sen_history():
+    """Fetch today's full history from sistemulenergetic.ro"""
+    try:
+        bucharest_tz = ZoneInfo("Europe/Bucharest")
+        now = datetime.now(bucharest_tz)
+
+        url = (
+            f"https://www.sistemulenergetic.ro/statistics/stream/xml/"
+            f"{now.year}/{now.month}/{now.day}/0/0/"
+            f"{now.year}/{now.month}/{now.day}/{now.hour}/{now.minute}"
+        )
+
+        resp = requests.get(url, timeout=20)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+
+        times = {}
+        series = root.find("series")
+        if series is not None:
+            for v in series.findall("value"):
+                xid = v.get("xid")
+                if v.text:
+                    times[xid] = v.text.strip()
+
+        all_rows = []
+        for xid, dt_str in sorted(times.items(), key=lambda x: int(x[0])):
+            r = {"date": dt_str}
+            for graph in root.findall("graph"):
+                title = graph.get("title")
+                for v in graph.findall("value"):
+                    if v.get("xid") == xid:
+                        txt = v.text.strip() if v.text else None
+                        r[title] = float(txt) if txt else None
+            all_rows.append(r)
+
+        return all_rows, None
+
+    except Exception as e:
+        return [], f"Eroare: {str(e)}"
 
 
 # ============================================================================
@@ -156,87 +231,79 @@ def main():
     bucharest_tz = ZoneInfo("Europe/Bucharest")
     bucharest_now = datetime.now(bucharest_tz)
 
-    # Fetch data
-    timestamp, plants, plants_prev, error = get_status_from_supabase()
+    st.title("🌞 Solar Plants Dashboard")
 
-    if error:
-        st.error(f"❌ {error}")
-        st.info("💡 Make sure master_report_updater_v3.py has run and uploaded data to Supabase")
-        return
+    tab1, tab2, tab3 = st.tabs(["🌞 Monitoring", "⚡ Curtailment", "🇷🇴 SEN & Piață"])
 
-    if not plants:
-        st.warning("⚠️ No plant data available")
-        return
+    # ============================
+    # TAB 1: MONITORING (existing)
+    # ============================
+    with tab1:
 
-    # ========================================================================
-    # CATEGORIZE BY SEVERITY
-    # ========================================================================
+        # Fetch data
+        timestamp, plants, plants_prev, error = get_status_from_supabase()
 
-    ok_plants       = [p for p in plants if p['severity'] == 'ok']
-    warning_plants  = [p for p in plants if p['severity'] == 'warning']
-    major_plants    = [p for p in plants if p['severity'] == 'major']
-    critical_plants = [p for p in plants if p['severity'] == 'critical']
-    delay_plants    = [p for p in plants if p['severity'] == 'delay']
+        if error:
+            st.error(f"❌ {error}")
+            st.info("💡 Make sure master_report_updater_v3.py has run and uploaded data to Supabase")
+            return
 
-    total_problems = len(critical_plants) + len(major_plants) + len(warning_plants) + len(delay_plants)
+        if not plants:
+            st.warning("⚠️ No plant data available")
+            return
 
-    # ========================================================================
-    # DATA STALENESS CHECK — always shown first
-    # ========================================================================
+        # ====================================================================
+        # CATEGORIZE BY SEVERITY
+        # ====================================================================
 
-    data_age_seconds = (bucharest_now.replace(tzinfo=None) - timestamp).total_seconds()
-    data_age_minutes = data_age_seconds / 60
+        ok_plants       = [p for p in plants if p['severity'] == 'ok']
+        warning_plants  = [p for p in plants if p['severity'] == 'warning']
+        major_plants    = [p for p in plants if p['severity'] == 'major']
+        critical_plants = [p for p in plants if p['severity'] == 'critical']
+        delay_plants    = [p for p in plants if p['severity'] == 'delay']
 
-    if data_age_minutes > 5:
-        st.error(
-            f"🚨 DATE VECHI! Ultimul update acum **{data_age_minutes:.0f} minute**! "
-            f"Verifică dacă `master_report_updater_v3.py` rulează corect."
+        total_problems = len(critical_plants) + len(major_plants) + len(warning_plants) + len(delay_plants)
+
+        # ====================================================================
+        # DATA STALENESS CHECK
+        # ====================================================================
+
+        data_age_seconds = (bucharest_now.replace(tzinfo=None) - timestamp).total_seconds()
+        data_age_minutes = data_age_seconds / 60
+
+        if data_age_minutes > 5:
+            st.error(
+                f"🚨 DATE VECHI! Ultimul update acum **{data_age_minutes:.0f} minute**! "
+                f"Verifică dacă `master_report_updater_v3.py` rulează corect."
+            )
+        elif data_age_minutes > 2:
+            st.warning(
+                f"⚠️ Date de **{data_age_minutes:.0f} minute** — colectorul de date poate fi lent."
+            )
+
+        # Dynamic browser title
+        if len(critical_plants) > 0:
+            tab_title = f"🚨 {len(critical_plants)} CRITICE | Solar Dashboard"
+        elif total_problems > 0:
+            tab_title = f"⚠️ {total_problems} Probleme | Solar Dashboard"
+        else:
+            tab_title = "✅ Solar Plants Status"
+
+        st.markdown(
+            f"<script>document.title = '{tab_title}';</script>",
+            unsafe_allow_html=True
         )
-    elif data_age_minutes > 2:
-        st.warning(
-            f"⚠️ Date de **{data_age_minutes:.0f} minute** — colectorul de date poate fi lent."
-        )
 
-    # ========================================================================
-    # DYNAMIC BROWSER TAB TITLE
-    # ========================================================================
+        st.markdown("Real-time monitoring of solar plant statuses")
 
-    if len(critical_plants) > 0:
-        tab_title = f"🚨 {len(critical_plants)} CRITICE | Solar Dashboard"
-    elif total_problems > 0:
-        tab_title = f"⚠️ {total_problems} Probleme | Solar Dashboard"
-    else:
-        tab_title = "✅ Solar Plants Status"
-
-    st.markdown(
-        f"<script>document.title = '{tab_title}';</script>",
-        unsafe_allow_html=True
-    )
-
-    # ========================================================================
-    # HEADER
-    # ========================================================================
-
-    st.title("🌞 Solar Plants Status Dashboard")
-    st.markdown("Real-time monitoring of solar plant statuses")
-
-
-    # ========================================================================
-    # TABS
-    # ========================================================================
-
-    tab_monitoring, tab_curtail = st.tabs(["🌞 Monitoring", "⚡ Curtailment"])
-
-    with tab_monitoring:
-        # ========================================================================
+        # ====================================================================
         # TOP SUMMARY METRICS WITH DELTA
-        # ========================================================================
+        # ====================================================================
 
         st.markdown("### 📊 Overview")
 
         col1, col2, col3, col4, col5 = st.columns(5)
 
-        # Compute deltas versus previous run
         delta_ok       = len(ok_plants)       - count_severity(plants_prev, 'ok')       if plants_prev else None
         delta_critical = len(critical_plants) - count_severity(plants_prev, 'critical') if plants_prev else None
         delta_major    = len(major_plants)    - count_severity(plants_prev, 'major')    if plants_prev else None
@@ -244,318 +311,285 @@ def main():
         delta_delay    = len(delay_plants)    - count_severity(plants_prev, 'delay')    if plants_prev else None
 
         with col1:
-            st.metric(
-                label="🟢 OK",
-                value=len(ok_plants),
-                delta=delta_ok,
-                delta_color="normal",
-                help="Plants operating normally"
-            )
-
+            st.metric(label="🟢 OK", value=len(ok_plants), delta=delta_ok, delta_color="normal")
         with col2:
-            st.metric(
-                label="🔴 Critical",
-                value=len(critical_plants),
-                delta=delta_critical,
-                delta_color="inverse",  # red is bad → inverse makes +delta red
-                help="No data / No fetch / Critical issues"
-            )
-
+            st.metric(label="🔴 Critical", value=len(critical_plants), delta=delta_critical, delta_color="inverse")
         with col3:
-            st.metric(
-                label="🟠 Major",
-                value=len(major_plants),
-                delta=delta_major,
-                delta_color="inverse",
-                help="Recovery from zero production"
-            )
-
+            st.metric(label="🟠 Major", value=len(major_plants), delta=delta_major, delta_color="inverse")
         with col4:
-            st.metric(
-                label="🔵 Warning",
-                value=len(warning_plants),
-                delta=delta_warning,
-                delta_color="inverse",
-                help="First suspect issue"
-            )
-
+            st.metric(label="🔵 Warning", value=len(warning_plants), delta=delta_warning, delta_color="inverse")
         with col5:
-            st.metric(
-                label="⏱️ Delay",
-                value=len(delay_plants),
-                delta=delta_delay,
-                delta_color="inverse",
-                help="Data delay detected"
-            )
+            st.metric(label="⏱️ Delay", value=len(delay_plants), delta=delta_delay, delta_color="inverse")
 
-        # Timestamps
         if data_age_minutes < 1:
             age_label = "acum câteva secunde"
         else:
             age_label = f"{data_age_minutes:.0f} min în urmă"
 
-        st.caption(f"📅 Ultimul update din Supabase: {timestamp.strftime('%Y-%m-%d %H:%M:%S')} ({age_label})")
+        st.caption(f"📅 Ultimul update: {timestamp.strftime('%Y-%m-%d %H:%M:%S')} ({age_label})")
         st.caption(f"🔄 Pagina refreshed la: {bucharest_now.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        # ========================================================================
-        # PIE CHART - STATUS DISTRIBUTION
-        # ========================================================================
+        # ====================================================================
+        # PIE CHART
+        # ====================================================================
 
         st.markdown("---")
-
         col_chart, col_legend = st.columns([3, 1])
 
         with col_chart:
             st.markdown("### 📈 Status Distribution")
 
-            labels = []
-            values = []
-            colors = []
-
+            labels, values, colors = [], [], []
             if len(ok_plants) > 0:
-                labels.append(f"OK ({len(ok_plants)})")
-                values.append(len(ok_plants))
-                colors.append("#00B050")
-
+                labels.append(f"OK ({len(ok_plants)})"); values.append(len(ok_plants)); colors.append("#00B050")
             if len(critical_plants) > 0:
-                labels.append(f"Critical ({len(critical_plants)})")
-                values.append(len(critical_plants))
-                colors.append("#FF0000")
-
+                labels.append(f"Critical ({len(critical_plants)})"); values.append(len(critical_plants)); colors.append("#FF0000")
             if len(major_plants) > 0:
-                labels.append(f"Major ({len(major_plants)})")
-                values.append(len(major_plants))
-                colors.append("#FFC000")
-
+                labels.append(f"Major ({len(major_plants)})"); values.append(len(major_plants)); colors.append("#FFC000")
             if len(warning_plants) > 0:
-                labels.append(f"Warning ({len(warning_plants)})")
-                values.append(len(warning_plants))
-                colors.append("#0070C0")
-
+                labels.append(f"Warning ({len(warning_plants)})"); values.append(len(warning_plants)); colors.append("#0070C0")
             if len(delay_plants) > 0:
-                labels.append(f"Delay ({len(delay_plants)})")
-                values.append(len(delay_plants))
-                colors.append("#808080")
+                labels.append(f"Delay ({len(delay_plants)})"); values.append(len(delay_plants)); colors.append("#808080")
 
             fig = go.Figure(data=[go.Pie(
-                labels=labels,
-                values=values,
-                marker=dict(colors=colors),
-                textinfo='label+percent',
-                hovertemplate='%{label}<br>%{percent}<extra></extra>',
-                hole=0.3
+                labels=labels, values=values, marker=dict(colors=colors),
+                textinfo='label+percent', hovertemplate='%{label}<br>%{percent}<extra></extra>', hole=0.3
             )])
-
-            fig.update_layout(
-                showlegend=False,
-                height=400,
-                margin=dict(t=20, b=20, l=20, r=20)
-            )
-
+            fig.update_layout(showlegend=False, height=400, margin=dict(t=20, b=20, l=20, r=20))
             st.plotly_chart(fig, use_container_width=True)
 
         with col_legend:
             st.markdown("### 📋 Legend")
-            st.markdown("")
-            st.markdown("🟢 **OK**")
-            st.caption("Normal operation")
-            st.markdown("🔴 **Critical**")
-            st.caption("No data / No fetch")
-            st.markdown("🟠 **Major**")
-            st.caption("Recovery from zero")
-            st.markdown("🔵 **Warning**")
-            st.caption("First suspect issue")
-            st.markdown("⏱️ **Delay**")
-            st.caption("Data delay only")
+            st.markdown("🟢 **OK**"); st.caption("Normal operation")
+            st.markdown("🔴 **Critical**"); st.caption("No data / No fetch")
+            st.markdown("🟠 **Major**"); st.caption("Recovery from zero")
+            st.markdown("🔵 **Warning**"); st.caption("First suspect issue")
+            st.markdown("⏱️ **Delay**"); st.caption("Data delay only")
 
-        # ========================================================================
-        # PROBLEMS LIST - CRITICAL FIRST (includes Delay)
-        # ========================================================================
+        # ====================================================================
+        # PROBLEMS LIST
+        # ====================================================================
 
         if total_problems > 0:
             st.markdown("---")
             st.markdown(f"### ⚠️ Plants with Issues ({total_problems})")
-
-            # Critical issues
             if critical_plants:
                 st.markdown("#### 🔴 Critical Issues")
                 for p in critical_plants:
-                    with st.container():
-                        st.error(f"**{p['name']}**")
-                        st.markdown(f"> {p['status']}")
-
-            # Major issues
+                    st.error(f"**{p['name']}**"); st.markdown(f"> {p['status']}")
             if major_plants:
                 st.markdown("#### 🟠 Major Issues")
                 for p in major_plants:
-                    with st.container():
-                        st.warning(f"**{p['name']}**")
-                        st.markdown(f"> {p['status']}")
-
-            # Warnings
+                    st.warning(f"**{p['name']}**"); st.markdown(f"> {p['status']}")
             if warning_plants:
                 st.markdown("#### 🔵 Warnings")
                 for p in warning_plants:
-                    with st.container():
-                        st.info(f"**{p['name']}**")
-                        st.markdown(f"> {p['status']}")
-
-            # Delays — now visible in problems section
+                    st.info(f"**{p['name']}**"); st.markdown(f"> {p['status']}")
             if delay_plants:
                 st.markdown("#### ⏱️ Data Delays")
                 for p in delay_plants:
-                    with st.container():
-                        st.info(f"⏱️ **{p['name']}**")
-                        st.markdown(f"> {p['status']}")
-
+                    st.info(f"⏱️ **{p['name']}**"); st.markdown(f"> {p['status']}")
         else:
             st.success("✅ All plants operating normally!")
 
-        # ========================================================================
-        # ALL PLANTS - EXPANDABLE WITH SEARCH
-        # ========================================================================
+        # ====================================================================
+        # ALL PLANTS EXPANDABLE
+        # ====================================================================
 
         st.markdown("---")
-
         with st.expander(f"📋 View All Plants ({len(plants)} total)", expanded=False):
-
-            search_term = st.text_input(
-                "🔍 Caută centrală...",
-                key="plant_search",
-                placeholder="Scrie numele centralei..."
-            )
-
-            # Sort by severity (critical first)
+            search_term = st.text_input("🔍 Caută centrală...", key="plant_search", placeholder="Scrie numele centralei...")
             severity_order = {'critical': 0, 'major': 1, 'warning': 2, 'delay': 3, 'ok': 4}
-            sorted_plants = sorted(
-                plants,
-                key=lambda x: (severity_order.get(x['severity'], 99), x['name'])
-            )
-
-            # Apply search filter
+            sorted_plants = sorted(plants, key=lambda x: (severity_order.get(x['severity'], 99), x['name']))
             if search_term:
-                filtered_plants = [
-                    p for p in sorted_plants
-                    if search_term.lower() in p['name'].lower()
-                ]
+                filtered_plants = [p for p in sorted_plants if search_term.lower() in p['name'].lower()]
                 if not filtered_plants:
                     st.warning(f"Nicio centrală găsită pentru '{search_term}'")
             else:
                 filtered_plants = sorted_plants
 
-            # Display in 3 columns
             cols = st.columns(3)
-
-            emoji_map = {
-                'ok':       '🟢',
-                'warning':  '🔵',
-                'major':    '🟠',
-                'critical': '🔴',
-                'delay':    '⏱️'
-            }
-
+            emoji_map = {'ok': '🟢', 'warning': '🔵', 'major': '🟠', 'critical': '🔴', 'delay': '⏱️'}
             for idx, plant in enumerate(filtered_plants):
                 with cols[idx % 3]:
                     emoji = emoji_map.get(plant['severity'], '⚪')
                     st.markdown(f"{emoji} **{plant['name']}**")
                     st.caption(plant['status'])
-                    st.markdown("")  # Spacing
+                    st.markdown("")
 
+        st.markdown("---")
+        st.caption("🔄 Auto-refreshes every 60 seconds | Data from Supabase")
 
-
-    with tab_curtail:
-        ALL_PLANTS = [
-            "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-            "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
-            "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass",
-            "Preferato", "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
-            "CEF Domnesti", "RES_ENERGY_PVPP", "Luxus_Energy_PVPP",
-        ]
-
+    # ============================
+    # TAB 2: CURTAILMENT
+    # ============================
+    with tab2:
         st.markdown("### ⚡ Curtailment Control")
+        st.info("📋 Funcționalitate curtailment - în curs de integrare. Folosiți `curtail_listener_v2.py` local pentru comenzi.")
+        st.markdown("""
+        **Cum funcționează:**
+        1. Rulați `curtail_listener_v2.py` pe server-ul Windows
+        2. Scriptul monitorizează tabelul `curtail_commands` din Supabase
+        3. Inserați o comandă cu action `curtail` sau `restore`
 
-        last_cmd = get_curtail_status()
-        if last_cmd:
-            action_label = "🔴 CURTAILED" if last_cmd.get("action") == "curtail" else "🟢 RESTORED"
-            status = last_cmd.get("status", "?")
-            created = last_cmd.get("created_at", "")[:19].replace("T", " ")
-            plants_affected = last_cmd.get("plants") or ["ALL"]
-            st.info(
-                f"**Ultima comanda:** {action_label} | "
-                f"Status: `{status}` | "
-                f"La: {created} | "
-                f"Centrale: {', '.join(plants_affected)}"
-            )
-        else:
-            st.info("Nicio comanda trimisa inca.")
+        **Stare curentă:** Sistemul de curtailment este operațional prin CLI.
+        Integrarea UI completă va fi adăugată în curând.
+        """)
+
+    # ============================
+    # TAB 3: SEN & PIATA
+    # ============================
+    with tab3:
+        st.markdown("### 🇷🇴 SEN România — Date în Timp Real")
+        st.caption("Sursa: sistemulenergetic.ro | Actualizat la ~5 min")
+
+        sen_latest, sen_error, sen_rows = get_sen_realtime()
+
+        if sen_error:
+            st.error(f"❌ {sen_error}")
+        elif sen_latest:
+            # ---- TIMESTAMP ----
+            st.caption(f"🕐 Ultimele date SEN: **{sen_latest.get('date', 'N/A')}**")
+
+            # ---- NEGATIVE PRICE BANNER (placeholder - OPCOM not yet integrated) ----
+            # st.warning("⚠️ PREȚ NEGATIV! Activați curtailment!")
+
+            # ---- MAIN METRICS ----
+            st.markdown("---")
+            col1, col2, col3, col4 = st.columns(4)
+
+            putere_ceruta   = sen_latest.get("Putere ceruta", 0) or 0
+            putere_debitata = sen_latest.get("Putere debitata", 0) or 0
+            fotovolt        = sen_latest.get("Fotovolt", 0) or 0
+            sold            = sen_latest.get("Sold", 0) or 0
+            eolian          = sen_latest.get("Eolian", 0) or 0
+            nuclear         = sen_latest.get("Nuclear", 0) or 0
+            hidro           = sen_latest.get("Hidro", 0) or 0
+            hidrocarburi    = sen_latest.get("Hidrocarburi", 0) or 0
+            carbune         = sen_latest.get("Carbune", 0) or 0
+
+            with col1:
+                st.metric(
+                    label="⚡ Consum național",
+                    value=f"{putere_ceruta:,.0f} MW",
+                    help="Puterea cerută la nivel național"
+                )
+            with col2:
+                st.metric(
+                    label="🏭 Producție totală",
+                    value=f"{putere_debitata:,.0f} MW",
+                    help="Puterea debitată în rețea"
+                )
+            with col3:
+                sold_label = "export" if sold > 0 else "import"
+                sold_color = "normal" if sold > 0 else "inverse"
+                st.metric(
+                    label=f"🔄 Sold ({sold_label})",
+                    value=f"{abs(sold):,.0f} MW",
+                    delta=f"{'↑ Export' if sold > 0 else '↓ Import'}",
+                    delta_color=sold_color,
+                    help="Pozitiv = export, Negativ = import"
+                )
+            with col4:
+                st.metric(
+                    label="☀️ Solar RO",
+                    value=f"{fotovolt:,.0f} MW",
+                    help="Producție fotovoltaică la nivel național"
+                )
+
+            # ---- BREAKDOWN ----
+            st.markdown("---")
+            st.markdown("#### 🔋 Mix energetic")
+
+            col_a, col_b, col_c, col_d, col_e = st.columns(5)
+            with col_a:
+                st.metric("💧 Hidro", f"{hidro:,.0f} MW")
+            with col_b:
+                st.metric("☢️ Nuclear", f"{nuclear:,.0f} MW")
+            with col_c:
+                st.metric("💨 Eolian", f"{eolian:,.0f} MW")
+            with col_d:
+                st.metric("🔥 Hidrocarburi", f"{hidrocarburi:,.0f} MW")
+            with col_e:
+                st.metric("⬛ Cărbune", f"{carbune:,.0f} MW")
+
+            # ---- SOLAR CHART TODAY ----
+            if sen_rows and len(sen_rows) > 2:
+                st.markdown("---")
+                st.markdown("#### ☀️ Producție Solar azi (ultimele 2h)")
+
+                dates = []
+                solar_vals = []
+                ceruta_vals = []
+                for row in sen_rows:
+                    dt_str = row.get("date")
+                    fv = row.get("Fotovolt")
+                    pc = row.get("Putere ceruta")
+                    if dt_str and fv is not None:
+                        dates.append(dt_str)
+                        solar_vals.append(fv)
+                        ceruta_vals.append(pc)
+
+                if dates:
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=dates, y=solar_vals,
+                        mode='lines', name='Solar (MW)',
+                        line=dict(color='#FFA500', width=2),
+                        fill='tozeroy', fillcolor='rgba(255,165,0,0.15)'
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=dates, y=ceruta_vals,
+                        mode='lines', name='Consum (MW)',
+                        line=dict(color='#1f77b4', width=1.5, dash='dot')
+                    ))
+                    fig.update_layout(
+                        height=300,
+                        margin=dict(t=10, b=40, l=50, r=10),
+                        legend=dict(orientation="h", y=-0.3),
+                        xaxis_title="Oră",
+                        yaxis_title="MW"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+            # ---- DAILY HISTORY CHART ----
+            with st.expander("📊 Grafic solar azi (ziua completă)", expanded=False):
+                with st.spinner("Se încarcă datele zilei..."):
+                    history_rows, hist_error = get_sen_history()
+                if hist_error:
+                    st.error(hist_error)
+                elif history_rows:
+                    h_dates, h_solar, h_ceruta = [], [], []
+                    for row in history_rows:
+                        dt_str = row.get("date")
+                        fv = row.get("Fotovolt")
+                        pc = row.get("Putere ceruta")
+                        if dt_str and fv is not None:
+                            h_dates.append(dt_str)
+                            h_solar.append(fv)
+                            h_ceruta.append(pc)
+
+                    if h_dates:
+                        fig2 = go.Figure()
+                        fig2.add_trace(go.Scatter(
+                            x=h_dates, y=h_solar, mode='lines', name='Solar (MW)',
+                            line=dict(color='#FFA500', width=2),
+                            fill='tozeroy', fillcolor='rgba(255,165,0,0.2)'
+                        ))
+                        fig2.add_trace(go.Scatter(
+                            x=h_dates, y=h_ceruta, mode='lines', name='Consum (MW)',
+                            line=dict(color='#1f77b4', width=1.5, dash='dot')
+                        ))
+                        fig2.update_layout(
+                            height=350, margin=dict(t=10, b=40, l=50, r=10),
+                            legend=dict(orientation="h", y=-0.3),
+                            xaxis_title="Oră", yaxis_title="MW"
+                        )
+                        st.plotly_chart(fig2, use_container_width=True)
 
         st.markdown("---")
-        select_all = st.checkbox("Toate centralele (17)", value=True, key="curtail_select_all")
-
-        selected_plants = None
-        if not select_all:
-            selected_plants = st.multiselect(
-                "Alege centralele:",
-                options=ALL_PLANTS,
-                default=[],
-                key="curtail_plant_select"
-            )
-
-        st.markdown("")
-        col_curtail, col_restore = st.columns(2)
-
-        with col_curtail:
-            st.markdown("**🔴 Oprire productie**")
-            st.caption("0 kW smartlogger / 0.1 kW per invertor shared")
-            if st.button("⚡ CURTAIL", type="primary", key="btn_curtail", use_container_width=True):
-                plants_to_send = None if select_all else selected_plants
-                if not select_all and not selected_plants:
-                    st.error("Selecteaza cel putin o centrala!")
-                else:
-                    if send_curtail_command("curtail", plants_to_send):
-                        st.success("✅ Comanda CURTAIL trimisa!")
-                        st.cache_data.clear()
-
-        with col_restore:
-            st.markdown("**🟢 Restore productie**")
-            st.caption("kw_max smartlogger / kw_per_invertor shared")
-            if st.button("🔄 RESTORE", type="secondary", key="btn_restore", use_container_width=True):
-                plants_to_send = None if select_all else selected_plants
-                if not select_all and not selected_plants:
-                    st.error("Selecteaza cel putin o centrala!")
-                else:
-                    if send_curtail_command("restore", plants_to_send):
-                        st.success("✅ Comanda RESTORE trimisa!")
-                        st.cache_data.clear()
-
-        st.markdown("---")
-        st.markdown("#### 📋 Istoric comenzi")
-        try:
-            supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-            history = supabase.table('curtail_commands')\
-                .select('created_at,action,status,plants,result')\
-                .order('created_at', desc=True)\
-                .limit(10)\
-                .execute()
-            if history.data:
-                for cmd in history.data:
-                    ts = cmd.get('created_at','')[:19].replace('T',' ')
-                    act = cmd.get('action','?')
-                    sts = cmd.get('status','?')
-                    pl = ', '.join(cmd.get('plants') or ['ALL'])
-                    icon = "🔴" if act == "curtail" else "🟢"
-                    status_icon = "✅" if sts == "done" else ("⏳" if sts in ["pending","running"] else "⚠️")
-                    st.caption(f"{status_icon} {ts} | {icon} {act.upper()} | {sts} | {pl}")
-            else:
-                st.caption("Nicio comanda in istoric.")
-        except Exception as e:
-            st.caption(f"Nu pot incarca istoricul: {e}")
-
-    # ========================================================================
-    # FOOTER
-    # ========================================================================
-    st.markdown("---")
-    st.caption("🔄 Auto-refreshes every 60 seconds | Data from Supabase")
+        st.caption("📌 Prețuri DAM (OPCOM/PZU) — în curs de integrare")
+        st.caption("🔄 Date SEN se actualizează la fiecare 2 minute")
 
 
 # ============================================================================
