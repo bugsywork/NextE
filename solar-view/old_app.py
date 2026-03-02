@@ -114,35 +114,6 @@ def count_severity(plants_list, severity):
     return len([p for p in plants_list if p['severity'] == severity])
 
 
-@st.cache_data(ttl=30)
-def get_curtail_status():
-    try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        result = supabase.table('curtail_commands')\
-            .select('*')\
-            .order('created_at', desc=True)\
-            .limit(1)\
-            .execute()
-        if result.data:
-            return result.data[0]
-        return None
-    except Exception:
-        return None
-
-
-def send_curtail_command(action: str, plants: list = None):
-    try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        payload = {"status": "pending", "action": action, "kw": 0}
-        if plants:
-            payload["plants"] = plants
-        supabase.table('curtail_commands').insert(payload).execute()
-        return True
-    except Exception as e:
-        st.error(f"Eroare trimitere comanda: {e}")
-        return False
-
-
 # ============================================================================
 # MAIN APP
 # ============================================================================
@@ -448,78 +419,6 @@ def main():
                 st.markdown(f"{emoji} **{plant['name']}**")
                 st.caption(plant['status'])
                 st.markdown("")  # Spacing
-
-    # ========================================================================
-    # CURTAILMENT CONTROL
-    # ========================================================================
-
-    st.markdown("---")
-    st.markdown("### ⚡ Curtailment Control")
-
-    ALL_PLANTS = [
-        "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-        "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
-        "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass",
-        "Preferato", "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
-        "CEF Domnesti", "RES_ENERGY_PVPP", "Luxus_Energy_PVPP",
-    ]
-
-    # Last command status
-    last_cmd = get_curtail_status()
-    if last_cmd:
-        action_label = "🔴 CURTAILED" if last_cmd.get("action") == "curtail" else "🟢 RESTORED"
-        status = last_cmd.get("status", "?")
-        created = last_cmd.get("created_at", "")[:19].replace("T", " ")
-        plants_affected = last_cmd.get("plants") or ["ALL"]
-        st.info(
-            f"**Ultima comanda:** {action_label} | "
-            f"Status: `{status}` | "
-            f"La: {created} | "
-            f"Centrale: {', '.join(plants_affected)}"
-        )
-    else:
-        st.info("Nicio comanda trimisa inca.")
-
-    with st.expander("⚡ Trimite comanda curtailment", expanded=False):
-
-        st.markdown("**Selectie centrale:**")
-        select_all = st.checkbox("Toate centralele (17)", value=True, key="curtail_select_all")
-
-        selected_plants = None
-        if not select_all:
-            selected_plants = st.multiselect(
-                "Alege centralele:",
-                options=ALL_PLANTS,
-                default=[],
-                key="curtail_plant_select"
-            )
-
-        st.markdown("---")
-        col_curtail, col_restore = st.columns(2)
-
-        with col_curtail:
-            st.markdown("**🔴 Oprire productie**")
-            st.caption("Seteaza 0 kW (smartlogger) sau 0.1 kW/inv (shared)")
-            if st.button("⚡ CURTAIL", type="primary", key="btn_curtail", use_container_width=True):
-                plants_to_send = None if select_all else selected_plants
-                if not select_all and not selected_plants:
-                    st.error("Selecteaza cel putin o centrala!")
-                else:
-                    if send_curtail_command("curtail", plants_to_send):
-                        st.success("✅ Comanda CURTAIL trimisa!")
-                        st.cache_data.clear()
-
-        with col_restore:
-            st.markdown("**🟢 Restore productie**")
-            st.caption("Seteaza kw_max (smartlogger) sau kw_per_inv (shared)")
-            if st.button("🔄 RESTORE", type="secondary", key="btn_restore", use_container_width=True):
-                plants_to_send = None if select_all else selected_plants
-                if not select_all and not selected_plants:
-                    st.error("Selecteaza cel putin o centrala!")
-                else:
-                    if send_curtail_command("restore", plants_to_send):
-                        st.success("✅ Comanda RESTORE trimisa!")
-                        st.cache_data.clear()
 
     # ========================================================================
     # FOOTER
