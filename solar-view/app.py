@@ -425,16 +425,154 @@ def main():
     # ============================
     with tab2:
         st.markdown("### ⚡ Curtailment Control")
-        st.info("📋 Funcționalitate curtailment - în curs de integrare. Folosiți `curtail_listener_v2.py` local pentru comenzi.")
-        st.markdown("""
-        **Cum funcționează:**
-        1. Rulați `curtail_listener_v2.py` pe server-ul Windows
-        2. Scriptul monitorizează tabelul `curtail_commands` din Supabase
-        3. Inserați o comandă cu action `curtail` sau `restore`
 
-        **Stare curentă:** Sistemul de curtailment este operațional prin CLI.
-        Integrarea UI completă va fi adăugată în curând.
-        """)
+        ALL_PLANTS = [
+            "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
+            "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
+            "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
+            "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
+            "RES_ENERGY_PVPP", "Luxus_Energy_PVPP"
+        ]
+
+        # ---- Helper functions ----
+        @st.cache_data(ttl=15)
+        def get_curtail_status():
+            try:
+                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                result = supabase.table('curtail_commands') \
+                    .select('*') \
+                    .order('created_at', desc=True) \
+                    .limit(1) \
+                    .execute()
+                if result.data:
+                    return result.data[0]
+                return None
+            except Exception as e:
+                return None
+
+        @st.cache_data(ttl=15)
+        def get_curtail_history():
+            try:
+                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                result = supabase.table('curtail_commands') \
+                    .select('*') \
+                    .order('created_at', desc=True) \
+                    .limit(10) \
+                    .execute()
+                return result.data if result.data else []
+            except Exception as e:
+                return []
+
+        def send_curtail_command(action: str, plants: list = None):
+            try:
+                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                payload = {
+                    "action": action,
+                    "plants": plants if plants else ALL_PLANTS,
+                    "status": "pending",
+                    "created_at": datetime.now(ZoneInfo("Europe/Bucharest")).isoformat()
+                }
+                result = supabase.table('curtail_commands').insert(payload).execute()
+                return True, "Comandă trimisă cu succes!"
+            except Exception as e:
+                return False, f"Eroare: {str(e)}"
+
+        # ---- Current Status ----
+        last_cmd = get_curtail_status()
+        col_status, col_info = st.columns([1, 2])
+        with col_status:
+            if last_cmd:
+                action = last_cmd.get('action', 'unknown').upper()
+                status = last_cmd.get('status', 'unknown')
+                ts = last_cmd.get('created_at', '')[:16].replace('T', ' ')
+                if action == 'CURTAIL':
+                    st.error(f"🔴 **CURTAILED**")
+                else:
+                    st.success(f"🟢 **RESTORED**")
+                st.caption(f"Status: `{status}` | {ts}")
+            else:
+                st.info("ℹ️ Nicio comandă anterioară")
+
+        with col_info:
+            st.markdown("**Comandă rapidă — toate cele 17 centrale:**")
+            col_c, col_r = st.columns(2)
+            with col_c:
+                if st.button("🔴 CURTAIL ALL", type="primary", use_container_width=True):
+                    ok, msg = send_curtail_command("curtail", ALL_PLANTS)
+                    if ok:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            with col_r:
+                if st.button("🟢 RESTORE ALL", use_container_width=True):
+                    ok, msg = send_curtail_command("restore", ALL_PLANTS)
+                    if ok:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        st.markdown("---")
+
+        # ---- Selective plant curtailment ----
+        with st.expander("🎯 Comandă selectivă — centrale individuale"):
+            select_all = st.checkbox("Toate centralele (17)", value=True)
+            if select_all:
+                selected_plants = ALL_PLANTS
+            else:
+                selected_plants = st.multiselect(
+                    "Selectați centralele:",
+                    options=ALL_PLANTS,
+                    default=[]
+                )
+            if selected_plants:
+                col_cs, col_rs = st.columns(2)
+                with col_cs:
+                    if st.button(f"🔴 CURTAIL ({len(selected_plants)})", key="curtail_sel", use_container_width=True):
+                        ok, msg = send_curtail_command("curtail", selected_plants)
+                        if ok:
+                            st.success(msg)
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                with col_rs:
+                    if st.button(f"🟢 RESTORE ({len(selected_plants)})", key="restore_sel", use_container_width=True):
+                        ok, msg = send_curtail_command("restore", selected_plants)
+                        if ok:
+                            st.success(msg)
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+        # ---- Command History ----
+        st.markdown("#### 📋 Istoric comenzi (ultimele 10)")
+        history = get_curtail_history()
+        if history:
+            for cmd in history:
+                action = cmd.get('action', '?').upper()
+                status = cmd.get('status', '?')
+                ts = cmd.get('created_at', '')[:16].replace('T', ' ')
+                plants_list = cmd.get('plants', [])
+                n_plants = len(plants_list) if isinstance(plants_list, list) else '?'
+                icon = "🔴" if action == "CURTAIL" else "🟢"
+                status_badge = "✅" if status == "completed" else ("⏳" if status == "pending" else "❌")
+                with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale"):
+                    if isinstance(plants_list, list) and plants_list:
+                        st.write(", ".join(plants_list))
+                    results = cmd.get('results', {})
+                    if results and isinstance(results, dict):
+                        for plant, res in results.items():
+                            ok_icon = "✅" if res.get('success') else "❌"
+                            method = res.get('method', '')
+                            err = res.get('error', '')
+                            st.caption(f"{ok_icon} **{plant}** ({method}) {err}")
+        else:
+            st.caption("Nicio comandă în baza de date.")
 
     # ============================
     # TAB 3: SEN & PIATA
@@ -450,6 +588,10 @@ def main():
         elif sen_latest:
             # ---- TIMESTAMP ----
             st.caption(f"🕐 Ultimele date SEN: **{sen_latest.get('date', 'N/A')}**")
+
+            # ---- DEBUG: show all keys (remove after fix) ----
+            with st.expander("🔍 Debug — chei XML disponibile"):
+                st.json(sen_latest)
 
             # ---- NEGATIVE PRICE BANNER (placeholder - OPCOM not yet integrated) ----
             # st.warning("⚠️ PREȚ NEGATIV! Activați curtailment!")
