@@ -114,6 +114,10 @@ def count_severity(plants_list, severity):
     return len([p for p in plants_list if p['severity'] == severity])
 
 
+# ============================================================================
+# CURTAILMENT HELPERS
+# ============================================================================
+
 @st.cache_data(ttl=30)
 def get_curtail_status():
     try:
@@ -139,7 +143,7 @@ def send_curtail_command(action: str, plants: list = None):
         supabase.table('curtail_commands').insert(payload).execute()
         return True
     except Exception as e:
-        st.error(f"Eroare trimitere comanda: {e}")
+        st.error(f"Eroare: {e}")
         return False
 
 
@@ -216,273 +220,276 @@ def main():
     st.title("🌞 Solar Plants Status Dashboard")
     st.markdown("Real-time monitoring of solar plant statuses")
 
-    # ========================================================================
-    # TOP SUMMARY METRICS WITH DELTA
-    # ========================================================================
-
-    st.markdown("### 📊 Overview")
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    # Compute deltas versus previous run
-    delta_ok       = len(ok_plants)       - count_severity(plants_prev, 'ok')       if plants_prev else None
-    delta_critical = len(critical_plants) - count_severity(plants_prev, 'critical') if plants_prev else None
-    delta_major    = len(major_plants)    - count_severity(plants_prev, 'major')    if plants_prev else None
-    delta_warning  = len(warning_plants)  - count_severity(plants_prev, 'warning')  if plants_prev else None
-    delta_delay    = len(delay_plants)    - count_severity(plants_prev, 'delay')    if plants_prev else None
-
-    with col1:
-        st.metric(
-            label="🟢 OK",
-            value=len(ok_plants),
-            delta=delta_ok,
-            delta_color="normal",
-            help="Plants operating normally"
-        )
-
-    with col2:
-        st.metric(
-            label="🔴 Critical",
-            value=len(critical_plants),
-            delta=delta_critical,
-            delta_color="inverse",  # red is bad → inverse makes +delta red
-            help="No data / No fetch / Critical issues"
-        )
-
-    with col3:
-        st.metric(
-            label="🟠 Major",
-            value=len(major_plants),
-            delta=delta_major,
-            delta_color="inverse",
-            help="Recovery from zero production"
-        )
-
-    with col4:
-        st.metric(
-            label="🔵 Warning",
-            value=len(warning_plants),
-            delta=delta_warning,
-            delta_color="inverse",
-            help="First suspect issue"
-        )
-
-    with col5:
-        st.metric(
-            label="⏱️ Delay",
-            value=len(delay_plants),
-            delta=delta_delay,
-            delta_color="inverse",
-            help="Data delay detected"
-        )
-
-    # Timestamps
-    if data_age_minutes < 1:
-        age_label = "acum câteva secunde"
-    else:
-        age_label = f"{data_age_minutes:.0f} min în urmă"
-
-    st.caption(f"📅 Ultimul update din Supabase: {timestamp.strftime('%Y-%m-%d %H:%M:%S')} ({age_label})")
-    st.caption(f"🔄 Pagina refreshed la: {bucharest_now.strftime('%Y-%m-%d %H:%M:%S')}")
 
     # ========================================================================
-    # PIE CHART - STATUS DISTRIBUTION
+    # TABS
     # ========================================================================
 
-    st.markdown("---")
+    tab_monitoring, tab_curtail = st.tabs(["🌞 Monitoring", "⚡ Curtailment"])
 
-    col_chart, col_legend = st.columns([3, 1])
+    with tab_monitoring:
+        # ========================================================================
+        # TOP SUMMARY METRICS WITH DELTA
+        # ========================================================================
 
-    with col_chart:
-        st.markdown("### 📈 Status Distribution")
+        st.markdown("### 📊 Overview")
 
-        labels = []
-        values = []
-        colors = []
+        col1, col2, col3, col4, col5 = st.columns(5)
 
-        if len(ok_plants) > 0:
-            labels.append(f"OK ({len(ok_plants)})")
-            values.append(len(ok_plants))
-            colors.append("#00B050")
+        # Compute deltas versus previous run
+        delta_ok       = len(ok_plants)       - count_severity(plants_prev, 'ok')       if plants_prev else None
+        delta_critical = len(critical_plants) - count_severity(plants_prev, 'critical') if plants_prev else None
+        delta_major    = len(major_plants)    - count_severity(plants_prev, 'major')    if plants_prev else None
+        delta_warning  = len(warning_plants)  - count_severity(plants_prev, 'warning')  if plants_prev else None
+        delta_delay    = len(delay_plants)    - count_severity(plants_prev, 'delay')    if plants_prev else None
 
-        if len(critical_plants) > 0:
-            labels.append(f"Critical ({len(critical_plants)})")
-            values.append(len(critical_plants))
-            colors.append("#FF0000")
+        with col1:
+            st.metric(
+                label="🟢 OK",
+                value=len(ok_plants),
+                delta=delta_ok,
+                delta_color="normal",
+                help="Plants operating normally"
+            )
 
-        if len(major_plants) > 0:
-            labels.append(f"Major ({len(major_plants)})")
-            values.append(len(major_plants))
-            colors.append("#FFC000")
+        with col2:
+            st.metric(
+                label="🔴 Critical",
+                value=len(critical_plants),
+                delta=delta_critical,
+                delta_color="inverse",  # red is bad → inverse makes +delta red
+                help="No data / No fetch / Critical issues"
+            )
 
-        if len(warning_plants) > 0:
-            labels.append(f"Warning ({len(warning_plants)})")
-            values.append(len(warning_plants))
-            colors.append("#0070C0")
+        with col3:
+            st.metric(
+                label="🟠 Major",
+                value=len(major_plants),
+                delta=delta_major,
+                delta_color="inverse",
+                help="Recovery from zero production"
+            )
 
-        if len(delay_plants) > 0:
-            labels.append(f"Delay ({len(delay_plants)})")
-            values.append(len(delay_plants))
-            colors.append("#808080")
+        with col4:
+            st.metric(
+                label="🔵 Warning",
+                value=len(warning_plants),
+                delta=delta_warning,
+                delta_color="inverse",
+                help="First suspect issue"
+            )
 
-        fig = go.Figure(data=[go.Pie(
-            labels=labels,
-            values=values,
-            marker=dict(colors=colors),
-            textinfo='label+percent',
-            hovertemplate='%{label}<br>%{percent}<extra></extra>',
-            hole=0.3
-        )])
+        with col5:
+            st.metric(
+                label="⏱️ Delay",
+                value=len(delay_plants),
+                delta=delta_delay,
+                delta_color="inverse",
+                help="Data delay detected"
+            )
 
-        fig.update_layout(
-            showlegend=False,
-            height=400,
-            margin=dict(t=20, b=20, l=20, r=20)
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_legend:
-        st.markdown("### 📋 Legend")
-        st.markdown("")
-        st.markdown("🟢 **OK**")
-        st.caption("Normal operation")
-        st.markdown("🔴 **Critical**")
-        st.caption("No data / No fetch")
-        st.markdown("🟠 **Major**")
-        st.caption("Recovery from zero")
-        st.markdown("🔵 **Warning**")
-        st.caption("First suspect issue")
-        st.markdown("⏱️ **Delay**")
-        st.caption("Data delay only")
-
-    # ========================================================================
-    # PROBLEMS LIST - CRITICAL FIRST (includes Delay)
-    # ========================================================================
-
-    if total_problems > 0:
-        st.markdown("---")
-        st.markdown(f"### ⚠️ Plants with Issues ({total_problems})")
-
-        # Critical issues
-        if critical_plants:
-            st.markdown("#### 🔴 Critical Issues")
-            for p in critical_plants:
-                with st.container():
-                    st.error(f"**{p['name']}**")
-                    st.markdown(f"> {p['status']}")
-
-        # Major issues
-        if major_plants:
-            st.markdown("#### 🟠 Major Issues")
-            for p in major_plants:
-                with st.container():
-                    st.warning(f"**{p['name']}**")
-                    st.markdown(f"> {p['status']}")
-
-        # Warnings
-        if warning_plants:
-            st.markdown("#### 🔵 Warnings")
-            for p in warning_plants:
-                with st.container():
-                    st.info(f"**{p['name']}**")
-                    st.markdown(f"> {p['status']}")
-
-        # Delays — now visible in problems section
-        if delay_plants:
-            st.markdown("#### ⏱️ Data Delays")
-            for p in delay_plants:
-                with st.container():
-                    st.info(f"⏱️ **{p['name']}**")
-                    st.markdown(f"> {p['status']}")
-
-    else:
-        st.success("✅ All plants operating normally!")
-
-    # ========================================================================
-    # ALL PLANTS - EXPANDABLE WITH SEARCH
-    # ========================================================================
-
-    st.markdown("---")
-
-    with st.expander(f"📋 View All Plants ({len(plants)} total)", expanded=False):
-
-        search_term = st.text_input(
-            "🔍 Caută centrală...",
-            key="plant_search",
-            placeholder="Scrie numele centralei..."
-        )
-
-        # Sort by severity (critical first)
-        severity_order = {'critical': 0, 'major': 1, 'warning': 2, 'delay': 3, 'ok': 4}
-        sorted_plants = sorted(
-            plants,
-            key=lambda x: (severity_order.get(x['severity'], 99), x['name'])
-        )
-
-        # Apply search filter
-        if search_term:
-            filtered_plants = [
-                p for p in sorted_plants
-                if search_term.lower() in p['name'].lower()
-            ]
-            if not filtered_plants:
-                st.warning(f"Nicio centrală găsită pentru '{search_term}'")
+        # Timestamps
+        if data_age_minutes < 1:
+            age_label = "acum câteva secunde"
         else:
-            filtered_plants = sorted_plants
+            age_label = f"{data_age_minutes:.0f} min în urmă"
 
-        # Display in 3 columns
-        cols = st.columns(3)
+        st.caption(f"📅 Ultimul update din Supabase: {timestamp.strftime('%Y-%m-%d %H:%M:%S')} ({age_label})")
+        st.caption(f"🔄 Pagina refreshed la: {bucharest_now.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        emoji_map = {
-            'ok':       '🟢',
-            'warning':  '🔵',
-            'major':    '🟠',
-            'critical': '🔴',
-            'delay':    '⏱️'
-        }
+        # ========================================================================
+        # PIE CHART - STATUS DISTRIBUTION
+        # ========================================================================
 
-        for idx, plant in enumerate(filtered_plants):
-            with cols[idx % 3]:
-                emoji = emoji_map.get(plant['severity'], '⚪')
-                st.markdown(f"{emoji} **{plant['name']}**")
-                st.caption(plant['status'])
-                st.markdown("")  # Spacing
+        st.markdown("---")
 
-    # ========================================================================
-    # CURTAILMENT CONTROL
-    # ========================================================================
+        col_chart, col_legend = st.columns([3, 1])
 
-    st.markdown("---")
-    st.markdown("### ⚡ Curtailment Control")
+        with col_chart:
+            st.markdown("### 📈 Status Distribution")
 
-    ALL_PLANTS = [
-        "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-        "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
-        "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass",
-        "Preferato", "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
-        "CEF Domnesti", "RES_ENERGY_PVPP", "Luxus_Energy_PVPP",
-    ]
+            labels = []
+            values = []
+            colors = []
 
-    # Last command status
-    last_cmd = get_curtail_status()
-    if last_cmd:
-        action_label = "🔴 CURTAILED" if last_cmd.get("action") == "curtail" else "🟢 RESTORED"
-        status = last_cmd.get("status", "?")
-        created = last_cmd.get("created_at", "")[:19].replace("T", " ")
-        plants_affected = last_cmd.get("plants") or ["ALL"]
-        st.info(
-            f"**Ultima comanda:** {action_label} | "
-            f"Status: `{status}` | "
-            f"La: {created} | "
-            f"Centrale: {', '.join(plants_affected)}"
-        )
-    else:
-        st.info("Nicio comanda trimisa inca.")
+            if len(ok_plants) > 0:
+                labels.append(f"OK ({len(ok_plants)})")
+                values.append(len(ok_plants))
+                colors.append("#00B050")
 
-    with st.expander("⚡ Trimite comanda curtailment", expanded=False):
+            if len(critical_plants) > 0:
+                labels.append(f"Critical ({len(critical_plants)})")
+                values.append(len(critical_plants))
+                colors.append("#FF0000")
 
-        st.markdown("**Selectie centrale:**")
+            if len(major_plants) > 0:
+                labels.append(f"Major ({len(major_plants)})")
+                values.append(len(major_plants))
+                colors.append("#FFC000")
+
+            if len(warning_plants) > 0:
+                labels.append(f"Warning ({len(warning_plants)})")
+                values.append(len(warning_plants))
+                colors.append("#0070C0")
+
+            if len(delay_plants) > 0:
+                labels.append(f"Delay ({len(delay_plants)})")
+                values.append(len(delay_plants))
+                colors.append("#808080")
+
+            fig = go.Figure(data=[go.Pie(
+                labels=labels,
+                values=values,
+                marker=dict(colors=colors),
+                textinfo='label+percent',
+                hovertemplate='%{label}<br>%{percent}<extra></extra>',
+                hole=0.3
+            )])
+
+            fig.update_layout(
+                showlegend=False,
+                height=400,
+                margin=dict(t=20, b=20, l=20, r=20)
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_legend:
+            st.markdown("### 📋 Legend")
+            st.markdown("")
+            st.markdown("🟢 **OK**")
+            st.caption("Normal operation")
+            st.markdown("🔴 **Critical**")
+            st.caption("No data / No fetch")
+            st.markdown("🟠 **Major**")
+            st.caption("Recovery from zero")
+            st.markdown("🔵 **Warning**")
+            st.caption("First suspect issue")
+            st.markdown("⏱️ **Delay**")
+            st.caption("Data delay only")
+
+        # ========================================================================
+        # PROBLEMS LIST - CRITICAL FIRST (includes Delay)
+        # ========================================================================
+
+        if total_problems > 0:
+            st.markdown("---")
+            st.markdown(f"### ⚠️ Plants with Issues ({total_problems})")
+
+            # Critical issues
+            if critical_plants:
+                st.markdown("#### 🔴 Critical Issues")
+                for p in critical_plants:
+                    with st.container():
+                        st.error(f"**{p['name']}**")
+                        st.markdown(f"> {p['status']}")
+
+            # Major issues
+            if major_plants:
+                st.markdown("#### 🟠 Major Issues")
+                for p in major_plants:
+                    with st.container():
+                        st.warning(f"**{p['name']}**")
+                        st.markdown(f"> {p['status']}")
+
+            # Warnings
+            if warning_plants:
+                st.markdown("#### 🔵 Warnings")
+                for p in warning_plants:
+                    with st.container():
+                        st.info(f"**{p['name']}**")
+                        st.markdown(f"> {p['status']}")
+
+            # Delays — now visible in problems section
+            if delay_plants:
+                st.markdown("#### ⏱️ Data Delays")
+                for p in delay_plants:
+                    with st.container():
+                        st.info(f"⏱️ **{p['name']}**")
+                        st.markdown(f"> {p['status']}")
+
+        else:
+            st.success("✅ All plants operating normally!")
+
+        # ========================================================================
+        # ALL PLANTS - EXPANDABLE WITH SEARCH
+        # ========================================================================
+
+        st.markdown("---")
+
+        with st.expander(f"📋 View All Plants ({len(plants)} total)", expanded=False):
+
+            search_term = st.text_input(
+                "🔍 Caută centrală...",
+                key="plant_search",
+                placeholder="Scrie numele centralei..."
+            )
+
+            # Sort by severity (critical first)
+            severity_order = {'critical': 0, 'major': 1, 'warning': 2, 'delay': 3, 'ok': 4}
+            sorted_plants = sorted(
+                plants,
+                key=lambda x: (severity_order.get(x['severity'], 99), x['name'])
+            )
+
+            # Apply search filter
+            if search_term:
+                filtered_plants = [
+                    p for p in sorted_plants
+                    if search_term.lower() in p['name'].lower()
+                ]
+                if not filtered_plants:
+                    st.warning(f"Nicio centrală găsită pentru '{search_term}'")
+            else:
+                filtered_plants = sorted_plants
+
+            # Display in 3 columns
+            cols = st.columns(3)
+
+            emoji_map = {
+                'ok':       '🟢',
+                'warning':  '🔵',
+                'major':    '🟠',
+                'critical': '🔴',
+                'delay':    '⏱️'
+            }
+
+            for idx, plant in enumerate(filtered_plants):
+                with cols[idx % 3]:
+                    emoji = emoji_map.get(plant['severity'], '⚪')
+                    st.markdown(f"{emoji} **{plant['name']}**")
+                    st.caption(plant['status'])
+                    st.markdown("")  # Spacing
+
+
+
+    with tab_curtail:
+        ALL_PLANTS = [
+            "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
+            "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
+            "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass",
+            "Preferato", "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
+            "CEF Domnesti", "RES_ENERGY_PVPP", "Luxus_Energy_PVPP",
+        ]
+
+        st.markdown("### ⚡ Curtailment Control")
+
+        last_cmd = get_curtail_status()
+        if last_cmd:
+            action_label = "🔴 CURTAILED" if last_cmd.get("action") == "curtail" else "🟢 RESTORED"
+            status = last_cmd.get("status", "?")
+            created = last_cmd.get("created_at", "")[:19].replace("T", " ")
+            plants_affected = last_cmd.get("plants") or ["ALL"]
+            st.info(
+                f"**Ultima comanda:** {action_label} | "
+                f"Status: `{status}` | "
+                f"La: {created} | "
+                f"Centrale: {', '.join(plants_affected)}"
+            )
+        else:
+            st.info("Nicio comanda trimisa inca.")
+
+        st.markdown("---")
         select_all = st.checkbox("Toate centralele (17)", value=True, key="curtail_select_all")
 
         selected_plants = None
@@ -494,12 +501,12 @@ def main():
                 key="curtail_plant_select"
             )
 
-        st.markdown("---")
+        st.markdown("")
         col_curtail, col_restore = st.columns(2)
 
         with col_curtail:
             st.markdown("**🔴 Oprire productie**")
-            st.caption("Seteaza 0 kW (smartlogger) sau 0.1 kW/inv (shared)")
+            st.caption("0 kW smartlogger / 0.1 kW per invertor shared")
             if st.button("⚡ CURTAIL", type="primary", key="btn_curtail", use_container_width=True):
                 plants_to_send = None if select_all else selected_plants
                 if not select_all and not selected_plants:
@@ -511,7 +518,7 @@ def main():
 
         with col_restore:
             st.markdown("**🟢 Restore productie**")
-            st.caption("Seteaza kw_max (smartlogger) sau kw_per_inv (shared)")
+            st.caption("kw_max smartlogger / kw_per_invertor shared")
             if st.button("🔄 RESTORE", type="secondary", key="btn_restore", use_container_width=True):
                 plants_to_send = None if select_all else selected_plants
                 if not select_all and not selected_plants:
@@ -521,10 +528,32 @@ def main():
                         st.success("✅ Comanda RESTORE trimisa!")
                         st.cache_data.clear()
 
+        st.markdown("---")
+        st.markdown("#### 📋 Istoric comenzi")
+        try:
+            supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            history = supabase.table('curtail_commands')\
+                .select('created_at,action,status,plants,result')\
+                .order('created_at', desc=True)\
+                .limit(10)\
+                .execute()
+            if history.data:
+                for cmd in history.data:
+                    ts = cmd.get('created_at','')[:19].replace('T',' ')
+                    act = cmd.get('action','?')
+                    sts = cmd.get('status','?')
+                    pl = ', '.join(cmd.get('plants') or ['ALL'])
+                    icon = "🔴" if act == "curtail" else "🟢"
+                    status_icon = "✅" if sts == "done" else ("⏳" if sts in ["pending","running"] else "⚠️")
+                    st.caption(f"{status_icon} {ts} | {icon} {act.upper()} | {sts} | {pl}")
+            else:
+                st.caption("Nicio comanda in istoric.")
+        except Exception as e:
+            st.caption(f"Nu pot incarca istoricul: {e}")
+
     # ========================================================================
     # FOOTER
     # ========================================================================
-
     st.markdown("---")
     st.caption("🔄 Auto-refreshes every 60 seconds | Data from Supabase")
 
