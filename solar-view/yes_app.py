@@ -588,259 +588,160 @@ def main():
     # TAB 3: SEN & PIATA
     # ============================
     with tab3:
+        st.markdown("### 🇷🇴 SEN România — Date în Timp Real")
+        st.caption("Sursa: sistemulenergetic.ro | Actualizat la ~5 min")
+
         sen_latest, sen_error, sen_rows = get_sen_realtime()
 
         if sen_error:
-            st.error(f"❌ Eroare date SEN: {sen_error}")
-            st.stop()
+            st.error(f"❌ {sen_error}")
+        elif sen_latest:
+            # ---- TIMESTAMP ----
+            st.caption(f"🕐 Ultimele date SEN: **{sen_latest.get('date', 'N/A')}**")
 
-        if not sen_latest:
-            st.warning("⏳ Se încarcă datele SEN...")
-            st.stop()
+            # ---- DEBUG: show all keys (remove after fix) ----
+            with st.expander("🔍 Debug — chei XML disponibile"):
+                st.json(sen_latest)
 
-        # ---- Extract values ----
-        putere_ceruta   = sen_latest.get("putere_ceruta", 0) or 0
-        putere_debitata = sen_latest.get("putere_debitata", 0) or 0
-        fotovolt        = sen_latest.get("fotovolt", 0) or 0
-        sold            = sen_latest.get("sold", 0) or 0
-        eolian          = sen_latest.get("eolian", 0) or 0
-        nuclear         = sen_latest.get("nuclear", 0) or 0
-        hidro           = sen_latest.get("hidro", 0) or 0
-        hidrocarburi    = sen_latest.get("hidrocarburi", 0) or 0
-        carbune         = sen_latest.get("carbune", 0) or 0
-        ts              = sen_latest.get("date", "N/A")
+            # ---- NEGATIVE PRICE BANNER (placeholder - OPCOM not yet integrated) ----
+            # st.warning("⚠️ PREȚ NEGATIV! Activați curtailment!")
 
-        # ---- Risk scoring pentru pretul de piata ----
-        # Logica: solar mare + export mare + hidro mare = risc pret negativ
-        risc_solar    = fotovolt > 1500   # >1500 MW solar national = risc
-        risc_export   = sold > 500         # export mare = surplus in retea
-        risc_hidro    = hidro > 3500       # hidro la capacitate = surplus
-        risc_score    = sum([risc_solar, risc_export, risc_hidro])
-        
-        surplus_mw    = putere_debitata - putere_ceruta
+            # ---- MAIN METRICS ----
+            st.markdown("---")
+            col1, col2, col3, col4 = st.columns(4)
 
-        # ============================================================
-        # ZONA 1: ALERT BANNER — afisata doar daca exista risc
-        # ============================================================
-        if risc_score >= 2:
-            st.error(
-                f"⚠️ **RISC PREȚ NEGATIV** — Solar: {fotovolt:.0f} MW | "
-                f"Export: {sold:.0f} MW | Surplus retea: {surplus_mw:+.0f} MW  |  "
-                f"Verificați OPCOM și considerați curtailment!"
-            )
-        elif risc_score == 1:
-            st.warning(
-                f"🟡 **Atenție** — Condiții parțiale de risc. "
-                f"Solar RO: {fotovolt:.0f} MW | Sold: {sold:+.0f} MW"
-            )
-        else:
-            st.success(
-                f"🟢 **Condiții normale** — Solar RO: {fotovolt:.0f} MW | "
-                f"Sold: {sold:+.0f} MW ({'export' if sold > 0 else 'import'})"
-            )
+            putere_ceruta   = sen_latest.get("putere_ceruta", 0) or 0
+            putere_debitata = sen_latest.get("putere_debitata", 0) or 0
+            fotovolt        = sen_latest.get("fotovolt", 0) or 0
+            sold            = sen_latest.get("sold", 0) or 0
+            eolian          = sen_latest.get("eolian", 0) or 0
+            nuclear         = sen_latest.get("nuclear", 0) or 0
+            hidro           = sen_latest.get("hidro", 0) or 0
+            hidrocarburi    = sen_latest.get("hidrocarburi", 0) or 0
+            carbune         = sen_latest.get("carbune", 0) or 0
 
-        st.caption(f"🕐 Date SEN: **{ts}** · Actualizare automată la 2 min · sursa: sistemulenergetic.ro")
-        st.markdown("---")
-
-        # ============================================================
-        # ZONA 2: KPI-URI PRINCIPALE — 2 rânduri
-        # ============================================================
-        # Rând 1: Balanța rețelei
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric(
-                "⚡ Consum național",
-                f"{putere_ceruta:,.0f} MW",
-                help="Puterea cerută de consumatori în acest moment"
-            )
-        with c2:
-            st.metric(
-                "🏭 Producție totală",
-                f"{putere_debitata:,.0f} MW",
-                delta=f"{surplus_mw:+.0f} MW față de consum",
-                delta_color="inverse" if surplus_mw > 300 else "normal",
-                help="Puterea injectată în rețea. Dacă e mult > consum = risc preț negativ"
-            )
-        with c3:
-            sold_icon = "📤" if sold > 0 else "📥"
-            sold_label = "Export" if sold > 0 else "Import"
-            st.metric(
-                f"{sold_icon} Sold ({sold_label})",
-                f"{abs(sold):,.0f} MW",
-                delta="↑ surplus" if sold > 500 else ("≈ echilibru" if abs(sold) < 200 else "↓ deficit"),
-                delta_color="inverse" if sold > 500 else "normal",
-                help="Export = producem mai mult decât consumăm. Export mare → prețuri mici/negative"
-            )
-        with c4:
-            solar_pct = (fotovolt / putere_debitata * 100) if putere_debitata > 0 else 0
-            solar_icon = "🔴" if risc_solar else ("🟡" if fotovolt > 800 else "🟢")
-            st.metric(
-                f"{solar_icon} Solar RO",
-                f"{fotovolt:,.0f} MW",
-                delta=f"{solar_pct:.1f}% din producție",
-                delta_color="inverse" if risc_solar else "off",
-                help="Producție fotovoltaică națională. >1500 MW = risc preț negativ în orele de vârf"
-            )
-
-        st.markdown("---")
-
-        # ============================================================
-        # ZONA 3: GRAFIC PRINCIPAL — Solar + Consum + Sold 2h
-        # ============================================================
-        if sen_rows and len(sen_rows) > 2:
-            dates, solar_vals, ceruta_vals, sold_vals, eolian_vals = [], [], [], [], []
-            for row in sen_rows:
-                dt_str = row.get("date")
-                fv = row.get("fotovolt")
-                if dt_str and fv is not None:
-                    dates.append(dt_str)
-                    solar_vals.append(fv)
-                    ceruta_vals.append(row.get("putere_ceruta") or 0)
-                    sold_vals.append(row.get("sold") or 0)
-                    eolian_vals.append(row.get("eolian") or 0)
-
-            if dates:
-                fig = go.Figure()
-                # Zona de risc (linie orizontala la 1500 MW)
-                fig.add_hline(
-                    y=1500, line_dash="dash", line_color="rgba(255,80,80,0.5)",
-                    annotation_text="Prag risc solar (1500 MW)",
-                    annotation_position="bottom right"
+            with col1:
+                st.metric(
+                    label="⚡ Consum național",
+                    value=f"{putere_ceruta:,.0f} MW",
+                    help="Puterea cerută la nivel național"
                 )
-                fig.add_trace(go.Scatter(
-                    x=dates, y=solar_vals, name="☀️ Solar (MW)",
-                    line=dict(color="#FFA500", width=2.5),
-                    fill="tozeroy", fillcolor="rgba(255,165,0,0.12)"
-                ))
-                fig.add_trace(go.Scatter(
-                    x=dates, y=eolian_vals, name="💨 Eolian (MW)",
-                    line=dict(color="#00BFFF", width=1.5),
-                    fill="tozeroy", fillcolor="rgba(0,191,255,0.08)"
-                ))
-                fig.add_trace(go.Scatter(
-                    x=dates, y=ceruta_vals, name="⚡ Consum (MW)",
-                    line=dict(color="#aaaaaa", width=1.5, dash="dot")
-                ))
-                fig.add_trace(go.Scatter(
-                    x=dates, y=sold_vals, name="📤 Sold (MW)",
-                    line=dict(color="#FF6B6B", width=1.5),
-                    yaxis="y2"
-                ))
-                fig.update_layout(
-                    title="Producție Regenerabilă vs Consum — ultimele 2h",
-                    height=380,
-                    margin=dict(t=40, b=40, l=60, r=60),
-                    legend=dict(orientation="h", y=-0.25),
-                    yaxis=dict(title="MW producție / consum"),
-                    yaxis2=dict(
-                        title="Sold (MW)",
-                        overlaying="y", side="right",
-                        showgrid=False,
-                        zeroline=True, zerolinecolor="rgba(255,107,107,0.3)"
-                    ),
-                    hovermode="x unified",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    paper_bgcolor="rgba(0,0,0,0)",
+            with col2:
+                st.metric(
+                    label="🏭 Producție totală",
+                    value=f"{putere_debitata:,.0f} MW",
+                    help="Puterea debitată în rețea"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+            with col3:
+                sold_label = "export" if sold > 0 else "import"
+                sold_color = "normal" if sold > 0 else "inverse"
+                st.metric(
+                    label=f"🔄 Sold ({sold_label})",
+                    value=f"{abs(sold):,.0f} MW",
+                    delta=f"{'↑ Export' if sold > 0 else '↓ Import'}",
+                    delta_color=sold_color,
+                    help="Pozitiv = export, Negativ = import"
+                )
+            with col4:
+                st.metric(
+                    label="☀️ Solar RO",
+                    value=f"{fotovolt:,.0f} MW",
+                    help="Producție fotovoltaică la nivel național"
+                )
 
-        st.markdown("---")
+            # ---- BREAKDOWN ----
+            st.markdown("---")
+            st.markdown("#### 🔋 Mix energetic")
 
-        # ============================================================
-        # ZONA 4: MIX ENERGETIC — bara progres vizuala
-        # ============================================================
-        st.markdown("#### 🔋 Mix energetic instant")
+            col_a, col_b, col_c, col_d, col_e = st.columns(5)
+            with col_a:
+                st.metric("💧 Hidro", f"{hidro:,.0f} MW")
+            with col_b:
+                st.metric("☢️ Nuclear", f"{nuclear:,.0f} MW")
+            with col_c:
+                st.metric("💨 Eolian", f"{eolian:,.0f} MW")
+            with col_d:
+                st.metric("🔥 Hidrocarburi", f"{hidrocarburi:,.0f} MW")
+            with col_e:
+                st.metric("⬛ Cărbune", f"{carbune:,.0f} MW")
 
-        surse = [
-            ("💧 Hidro",        hidro,        "#1E90FF"),
-            ("☢️ Nuclear",      nuclear,      "#9B59B6"),
-            ("🔥 Hidrocarburi", hidrocarburi, "#E67E22"),
-            ("☀️ Solar",        fotovolt,     "#FFA500"),
-            ("💨 Eolian",       eolian,       "#00BFFF"),
-            ("⬛ Cărbune",      carbune,      "#7F8C8D"),
-        ]
-        total_prod = putere_debitata if putere_debitata > 0 else 1
+            # ---- SOLAR CHART TODAY ----
+            if sen_rows and len(sen_rows) > 2:
+                st.markdown("---")
+                st.markdown("#### ☀️ Producție Solar azi (ultimele 2h)")
 
-        cols = st.columns(len(surse))
-        for col, (label, val, color) in zip(cols, surse):
-            pct = val / total_prod * 100 if val and val > 0 else 0
-            with col:
-                st.metric(label, f"{val:,.0f} MW", f"{pct:.1f}%")
-
-        # Bara stacked vizuala
-        fig_mix = go.Figure(go.Bar(
-            x=[s[1] if s[1] and s[1] > 0 else 0 for s in surse],
-            y=["Mix"] * len(surse),
-            orientation="h",
-            marker_color=[s[2] for s in surse],
-            text=[f"{s[0]} {s[1]:,.0f}MW" for s in surse],
-            textposition="inside",
-            insidetextanchor="middle",
-        ))
-        fig_mix.update_layout(
-            barmode="stack", height=80,
-            margin=dict(t=0, b=0, l=0, r=0),
-            showlegend=False,
-            xaxis=dict(showticklabels=False, showgrid=False),
-            yaxis=dict(showticklabels=False, showgrid=False),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-        )
-        st.plotly_chart(fig_mix, use_container_width=True)
-
-        # ============================================================
-        # ZONA 5: GRAFIC ZIUA COMPLETĂ (expandabil)
-        # ============================================================
-        with st.expander("📊 Evoluție ziua completă (0:00 → acum)", expanded=False):
-            with st.spinner("Se încarcă datele zilei..."):
-                history_rows, hist_error = get_sen_history()
-            if hist_error:
-                st.error(hist_error)
-            elif history_rows:
-                h_dates, h_solar, h_ceruta, h_sold, h_eolian = [], [], [], [], []
-                for row in history_rows:
+                dates = []
+                solar_vals = []
+                ceruta_vals = []
+                for row in sen_rows:
                     dt_str = row.get("date")
                     fv = row.get("fotovolt")
+                    pc = row.get("putere_ceruta")
                     if dt_str and fv is not None:
-                        h_dates.append(dt_str)
-                        h_solar.append(fv)
-                        h_ceruta.append(row.get("putere_ceruta") or 0)
-                        h_sold.append(row.get("sold") or 0)
-                        h_eolian.append(row.get("eolian") or 0)
+                        dates.append(dt_str)
+                        solar_vals.append(fv)
+                        ceruta_vals.append(pc)
 
-                if h_dates:
-                    fig2 = go.Figure()
-                    fig2.add_hline(y=1500, line_dash="dash", line_color="rgba(255,80,80,0.4)",
-                                   annotation_text="Prag risc 1500 MW")
-                    fig2.add_trace(go.Scatter(
-                        x=h_dates, y=h_solar, name="☀️ Solar",
-                        line=dict(color="#FFA500", width=2),
-                        fill="tozeroy", fillcolor="rgba(255,165,0,0.15)"
+                if dates:
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=dates, y=solar_vals,
+                        mode='lines', name='Solar (MW)',
+                        line=dict(color='#FFA500', width=2),
+                        fill='tozeroy', fillcolor='rgba(255,165,0,0.15)'
                     ))
-                    fig2.add_trace(go.Scatter(
-                        x=h_dates, y=h_eolian, name="💨 Eolian",
-                        line=dict(color="#00BFFF", width=1.5),
-                        fill="tozeroy", fillcolor="rgba(0,191,255,0.08)"
+                    fig.add_trace(go.Scatter(
+                        x=dates, y=ceruta_vals,
+                        mode='lines', name='Consum (MW)',
+                        line=dict(color='#1f77b4', width=1.5, dash='dot')
                     ))
-                    fig2.add_trace(go.Scatter(
-                        x=h_dates, y=h_ceruta, name="⚡ Consum",
-                        line=dict(color="#aaaaaa", width=1.5, dash="dot")
-                    ))
-                    fig2.add_trace(go.Scatter(
-                        x=h_dates, y=h_sold, name="📤 Sold",
-                        line=dict(color="#FF6B6B", width=1.5),
-                        yaxis="y2"
-                    ))
-                    fig2.update_layout(
-                        height=400, margin=dict(t=20, b=40, l=60, r=60),
-                        legend=dict(orientation="h", y=-0.25),
-                        yaxis=dict(title="MW"),
-                        yaxis2=dict(title="Sold (MW)", overlaying="y", side="right", showgrid=False),
-                        hovermode="x unified",
-                        plot_bgcolor="rgba(0,0,0,0)",
-                        paper_bgcolor="rgba(0,0,0,0)",
+                    fig.update_layout(
+                        height=300,
+                        margin=dict(t=10, b=40, l=50, r=10),
+                        legend=dict(orientation="h", y=-0.3),
+                        xaxis_title="Oră",
+                        yaxis_title="MW"
                     )
-                    st.plotly_chart(fig2, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True)
+
+            # ---- DAILY HISTORY CHART ----
+            with st.expander("📊 Grafic solar azi (ziua completă)", expanded=False):
+                with st.spinner("Se încarcă datele zilei..."):
+                    history_rows, hist_error = get_sen_history()
+                if hist_error:
+                    st.error(hist_error)
+                elif history_rows:
+                    h_dates, h_solar, h_ceruta = [], [], []
+                    for row in history_rows:
+                        dt_str = row.get("date")
+                        fv = row.get("fotovolt")
+                        pc = row.get("putere_ceruta")
+                        if dt_str and fv is not None:
+                            h_dates.append(dt_str)
+                            h_solar.append(fv)
+                            h_ceruta.append(pc)
+
+                    if h_dates:
+                        fig2 = go.Figure()
+                        fig2.add_trace(go.Scatter(
+                            x=h_dates, y=h_solar, mode='lines', name='Solar (MW)',
+                            line=dict(color='#FFA500', width=2),
+                            fill='tozeroy', fillcolor='rgba(255,165,0,0.2)'
+                        ))
+                        fig2.add_trace(go.Scatter(
+                            x=h_dates, y=h_ceruta, mode='lines', name='Consum (MW)',
+                            line=dict(color='#1f77b4', width=1.5, dash='dot')
+                        ))
+                        fig2.update_layout(
+                            height=350, margin=dict(t=10, b=40, l=50, r=10),
+                            legend=dict(orientation="h", y=-0.3),
+                            xaxis_title="Oră", yaxis_title="MW"
+                        )
+                        st.plotly_chart(fig2, use_container_width=True)
+
+        st.markdown("---")
+        st.caption("📌 Prețuri DAM (OPCOM/PZU) — în curs de integrare")
+        st.caption("🔄 Date SEN se actualizează la fiecare 2 minute")
 
 
 # ============================================================================
