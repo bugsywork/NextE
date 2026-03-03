@@ -122,69 +122,59 @@ def count_severity(plants_list, severity):
 
 @st.cache_data(ttl=120)
 def get_sen_realtime():
-    """Fetch latest SEN data by parsing HTML table from sistemulenergetic.ro"""
+    """Fetch latest SEN data from sistemulenergetic.ro"""
     try:
-        import re
         bucharest_tz = ZoneInfo("Europe/Bucharest")
         now = datetime.now(bucharest_tz)
         start = now - timedelta(hours=2)
 
         url = (
-            f"https://www.sistemulenergetic.ro/statistics/show_graph/"
+            f"https://www.sistemulenergetic.ro/statistics/stream/xml/"
             f"{start.year}/{start.month}/{start.day}/{start.hour}/{start.minute}/"
             f"{now.year}/{now.month}/{now.day}/{now.hour}/{now.minute}"
         )
 
-        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=15)
         resp.raise_for_status()
-        html = resp.text
+        root = ET.fromstring(resp.text)
 
-        # Extract all <tr class="body_row"> rows
-        row_pattern = re.compile(
-            r'<tr class="body_row">\s*'
-            r'<td[^>]*>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>\s*'
-            r'<td>(.*?)</td>',
-            re.DOTALL
-        )
+        # Parse timestamps
+        times = {}
+        series = root.find("series")
+        if series is not None:
+            for v in series.findall("value"):
+                xid = v.get("xid")
+                if v.text:
+                    times[xid] = v.text.strip()
 
-        def safe_float(s):
-            try:
-                return float(s.strip())
-            except:
-                return None
+        if not times:
+            return None, "Nu s-au găsit date", []
 
+        # Latest xid
+        max_xid = max(times.keys(), key=lambda x: int(x))
+
+        # Build latest row
+        latest = {"date": times[max_xid]}
+        for graph in root.findall("graph"):
+            title = graph.get("title")
+            for v in graph.findall("value"):
+                if v.get("xid") == max_xid:
+                    txt = v.text.strip() if v.text else None
+                    latest[title] = float(txt) if txt else None
+
+        # Build all rows for chart
         all_rows = []
-        for m in row_pattern.finditer(html):
-            all_rows.append({
-                "date":            m.group(1).strip(),
-                "putere_ceruta":   safe_float(m.group(2)),
-                "putere_debitata": safe_float(m.group(3)),
-                "nuclear":         safe_float(m.group(4)),
-                "eolian":          safe_float(m.group(5)),
-                "hidro":           safe_float(m.group(6)),
-                "hidrocarburi":    safe_float(m.group(7)),
-                "carbune":         safe_float(m.group(8)),
-                "fotovolt":        safe_float(m.group(9)),
-                "biomasa":         safe_float(m.group(10)),
-                "stocare":         safe_float(m.group(11)),
-                "sold":            safe_float(m.group(12)),
-            })
+        for xid, dt_str in sorted(times.items(), key=lambda x: int(x[0])):
+            r = {"date": dt_str}
+            for graph in root.findall("graph"):
+                title = graph.get("title")
+                for v in graph.findall("value"):
+                    if v.get("xid") == xid:
+                        txt = v.text.strip() if v.text else None
+                        r[title] = float(txt) if txt else None
+            all_rows.append(r)
 
-        if not all_rows:
-            return None, "Nu s-au gasit randuri in tabel", []
-
-        latest = all_rows[0]  # First row = most recent
-        return latest, None, list(reversed(all_rows))
+        return latest, None, all_rows
 
     except Exception as e:
         return None, f"Eroare SEN: {str(e)}", []
@@ -610,15 +600,15 @@ def main():
             st.markdown("---")
             col1, col2, col3, col4 = st.columns(4)
 
-            putere_ceruta   = sen_latest.get("putere_ceruta", 0) or 0
-            putere_debitata = sen_latest.get("putere_debitata", 0) or 0
-            fotovolt        = sen_latest.get("fotovolt", 0) or 0
-            sold            = sen_latest.get("sold", 0) or 0
-            eolian          = sen_latest.get("eolian", 0) or 0
-            nuclear         = sen_latest.get("nuclear", 0) or 0
-            hidro           = sen_latest.get("hidro", 0) or 0
-            hidrocarburi    = sen_latest.get("hidrocarburi", 0) or 0
-            carbune         = sen_latest.get("carbune", 0) or 0
+            putere_ceruta   = sen_latest.get("Putere ceruta", 0) or 0
+            putere_debitata = sen_latest.get("Putere debitata", 0) or 0
+            fotovolt        = sen_latest.get("Fotovolt", 0) or 0
+            sold            = sen_latest.get("Sold", 0) or 0
+            eolian          = sen_latest.get("Eolian", 0) or 0
+            nuclear         = sen_latest.get("Nuclear", 0) or 0
+            hidro           = sen_latest.get("Hidro", 0) or 0
+            hidrocarburi    = sen_latest.get("Hidrocarburi", 0) or 0
+            carbune         = sen_latest.get("Carbune", 0) or 0
 
             with col1:
                 st.metric(
@@ -675,8 +665,8 @@ def main():
                 ceruta_vals = []
                 for row in sen_rows:
                     dt_str = row.get("date")
-                    fv = row.get("fotovolt")
-                    pc = row.get("putere_ceruta")
+                    fv = row.get("Fotovolt")
+                    pc = row.get("Putere ceruta")
                     if dt_str and fv is not None:
                         dates.append(dt_str)
                         solar_vals.append(fv)
@@ -714,8 +704,8 @@ def main():
                     h_dates, h_solar, h_ceruta = [], [], []
                     for row in history_rows:
                         dt_str = row.get("date")
-                        fv = row.get("fotovolt")
-                        pc = row.get("putere_ceruta")
+                        fv = row.get("Fotovolt")
+                        pc = row.get("Putere ceruta")
                         if dt_str and fv is not None:
                             h_dates.append(dt_str)
                             h_solar.append(fv)
