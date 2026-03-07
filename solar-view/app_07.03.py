@@ -478,7 +478,6 @@ def main():
                 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
                 payload = {
                     "action": action,
-                    "kw": 0.0 if action == "curtail" else 99999.0,
                     "plants": plants if plants else ALL_PLANTS,
                     "status": "pending",
                     "created_at": datetime.now(ZoneInfo("Europe/Bucharest")).isoformat()
