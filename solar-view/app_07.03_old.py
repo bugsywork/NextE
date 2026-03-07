@@ -573,33 +573,15 @@ def main():
                 icon = "🔴" if action == "CURTAIL" else "🟢"
                 status_badge = "✅" if status == "completed" else ("⏳" if status == "pending" else "❌")
                 with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale"):
-                    results = cmd.get('result') or cmd.get('results')
-                    # Normalizează: poate fi list sau dict sau JSON string
-                    if isinstance(results, str):
-                        try:
-                            import json as _json
-                            results = _json.loads(results)
-                        except Exception:
-                            results = None
-
-                    if isinstance(results, list) and results:
-                        ok_plants   = [r for r in results if r.get('success')]
-                        fail_plants = [r for r in results if not r.get('success')]
-                        if ok_plants:
-                            st.success(f"✅ Reușite ({len(ok_plants)}): " + ", ".join(r['plant'] for r in ok_plants))
-                        if fail_plants:
-                            st.error(f"❌ Eșuate ({len(fail_plants)}):")
-                            for r in fail_plants:
-                                st.caption(f"  • **{r['plant']}** — {r.get('error', 'eroare necunoscută')}")
-                    elif isinstance(results, dict) and results:
+                    if isinstance(plants_list, list) and plants_list:
+                        st.write(", ".join(plants_list))
+                    results = cmd.get('results', {})
+                    if results and isinstance(results, dict):
                         for plant, res in results.items():
                             ok_icon = "✅" if res.get('success') else "❌"
+                            method = res.get('method', '')
                             err = res.get('error', '')
-                            st.caption(f"{ok_icon} **{plant}** {err}")
-                    else:
-                        # Nu avem rezultate încă (running/pending)
-                        if isinstance(plants_list, list) and plants_list:
-                            st.write(", ".join(plants_list))
+                            st.caption(f"{ok_icon} **{plant}** ({method}) {err}")
         else:
             st.caption("Nicio comandă în baza de date.")
 
