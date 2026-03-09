@@ -473,7 +473,7 @@ def main():
             else:
                 filtered_plants = sorted_plants
 
-            cols = st.columns(3)
+            cols = st.columns([1, 1, 1, 3])
             emoji_map = {'ok': '🟢', 'warning': '🔵', 'major': '🟠', 'critical': '🔴', 'delay': '⏱️'}
             for idx, plant in enumerate(filtered_plants):
                 with cols[idx % 3]:
