@@ -61,12 +61,12 @@ def render_contact_info(plant_name, contacts):
     if parts:
         st.markdown("  ".join(parts))
     contacts_parts = []
+    if info.get("persoana_comercial"):
+        contacts_parts.append(f"💼 {info['persoana_comercial']} {info.get('tel_comercial','')}")
     if info.get("contact_tehnic"):
         contacts_parts.append(f"🔧 {info['contact_tehnic']} {info.get('tel_tehnic','')}")
     if info.get("contact_om"):
-        contacts_parts.append(f"⚙️ {info['contact_om']} {info.get('tel_om','')}")
-    if info.get("persoana_comercial"):
-        contacts_parts.append(f"💼 {info['persoana_comercial']} {info.get('tel_comercial','')}")
+        contacts_parts.append(f"🛠️ {info['contact_om']} {info.get('tel_om','')}")
     if contacts_parts:
         st.caption(" | ".join(contacts_parts))
 
