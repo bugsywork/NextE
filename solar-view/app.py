@@ -43,7 +43,7 @@ st_autorefresh(interval=60 * 1000, key="dashboard_refresh")
 def load_contacts():
     try:
         csv_path = os.path.join(os.path.dirname(__file__), "plant_contacts.csv")
-        df = pd.read_csv(csv_path, sep=None, engine="python", dtype=str).fillna("")
+        df = pd.read_csv(csv_path, sep=None, engine="python", dtype=str, encoding="cp1252").fillna("")
         return {row["screen_name"]: row for _, row in df.iterrows()}
     except Exception as e:
         st.write(f"CSV error: {e}")
