@@ -41,8 +41,10 @@ st_autorefresh(interval=60 * 1000, key="dashboard_refresh")
 
 @st.cache_data(ttl=300)
 def load_contacts():
-    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plant_contacts.csv")
-    if not os.path.exists(csv_path):
+    try:
+        df = pd.read_csv("plant_contacts.csv", sep=None, engine="python", dtype=str).fillna("")
+        return {row["screen_name"]: row for _, row in df.iterrows()}
+    except Exception:
         return {}
     try:
         df = pd.read_csv(csv_path, sep=None, engine="python", dtype=str).fillna("")
