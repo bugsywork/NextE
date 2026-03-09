@@ -58,26 +58,17 @@ def render_contact_info(plant_name, contacts):
         parts.append(f"📌 **{info['alias_pvpp']}**")
     if info.get("Link"):
         parts.append(f"[🔗 Platform]({info['Link']})")
-    st.markdown("  ".join(parts) if parts else "")
-    cols = st.columns(3)
-    with cols[0]:
-        if info.get("contact_tehnic"):
-            st.caption(f"🔧 **Tehnic**")
-            st.caption(f"{info['contact_tehnic']}")
-            if info.get("tel_tehnic"):
-                st.caption(f"📞 {info['tel_tehnic']}")
-    with cols[1]:
-        if info.get("contact_om"):
-            st.caption(f"⚙️ **O&M**")
-            st.caption(f"{info['contact_om']}")
-            if info.get("tel_om"):
-                st.caption(f"📞 {info['tel_om']}")
-    with cols[2]:
-        if info.get("persoana_comercial"):
-            st.caption(f"💼 **Comercial**")
-            st.caption(f"{info['persoana_comercial']}")
-            if info.get("tel_comercial"):
-                st.caption(f"📞 {info['tel_comercial']}")
+    if parts:
+        st.markdown("  ".join(parts))
+    contacts_parts = []
+    if info.get("contact_tehnic"):
+        contacts_parts.append(f"🔧 {info['contact_tehnic']} {info.get('tel_tehnic','')}")
+    if info.get("contact_om"):
+        contacts_parts.append(f"⚙️ {info['contact_om']} {info.get('tel_om','')}")
+    if info.get("persoana_comercial"):
+        contacts_parts.append(f"💼 {info['persoana_comercial']} {info.get('tel_comercial','')}")
+    if contacts_parts:
+        st.caption(" | ".join(contacts_parts))
 
 # Supabase Configuration - Read from Streamlit Secrets
 try:
