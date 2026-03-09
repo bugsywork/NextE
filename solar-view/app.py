@@ -74,6 +74,16 @@ def render_contact_info(plant_name, contacts):
         st.caption(" | ".join(contacts_parts))
 
 
+# Supabase Configuration - Read from Streamlit Secrets
+try:
+    SUPABASE_URL = st.secrets["supabase"]["url"]
+    SUPABASE_KEY = st.secrets["supabase"]["key"]
+except Exception as e:
+    st.error(f"⚠️ Secrets not configured! Go to Settings → Secrets and add Supabase credentials")
+    st.write(f"Error: {e}")
+    st.stop()
+
+
 # ============================================================================
 # DATA FETCHING
 # ============================================================================
