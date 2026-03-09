@@ -54,8 +54,11 @@ def render_contact_info(plant_name, contacts):
     if info is None:
         return
     parts = []
-    if info.get("alias_pvpp"):
-        parts.append(f"📌 **{info['alias_pvpp']}**")
+        if info.get("alias_pvpp"):
+        alias_text = info['alias_pvpp']
+        if info.get("zone"):
+            alias_text += f" | zone {info['zone']}"
+        parts.append(f"📌 **{alias_text}**")
     if info.get("Link"):
         parts.append(f"[🔗 Platform]({info['Link']})")
     if parts:
