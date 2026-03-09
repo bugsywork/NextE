@@ -45,7 +45,7 @@ def load_contacts():
     if not os.path.exists(csv_path):
         return {}
     try:
-        df = pd.read_csv(csv_path, sep="\t", dtype=str).fillna("")
+        df = pd.read_csv(csv_path, sep=None, engine="python", dtype=str).fillna("")
         return {row["screen_name"]: row for _, row in df.iterrows()}
     except Exception:
         return {}
