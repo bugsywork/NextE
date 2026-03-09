@@ -430,8 +430,6 @@ def main():
             st.markdown("---")
             st.markdown(f"### ⚠️ Plants with Issues ({total_problems})")
             contacts = load_contacts()
-            st.write(f"Contacts loaded: {len(contacts)}")
-            st.write(f"Keys: {list(contacts.keys())[:5]}")
             if critical_plants:
                 st.markdown("#### 🔴 Critical Issues")
                 for p in critical_plants:
