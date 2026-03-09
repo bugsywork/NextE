@@ -431,6 +431,7 @@ def main():
             st.markdown("---")
             st.markdown(f"### ⚠️ Plants with Issues ({total_problems})")
             contacts = load_contacts()
+            st.write(contacts)
             if critical_plants:
                 st.markdown("#### 🔴 Critical Issues")
                 for p in critical_plants:
