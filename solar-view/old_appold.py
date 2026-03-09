@@ -54,8 +54,8 @@ def render_contact_info(plant_name, contacts):
     if info is None:
         return
     parts = []
-    if info.get("alias_pvpp"):
-        alias_text = info["alias_pvpp"]
+        if info.get("alias_pvpp"):
+        alias_text = info['alias_pvpp']
         if info.get("zone"):
             alias_text += f" | zone {info['zone']}"
         parts.append(f"📌 **{alias_text}**")
@@ -65,13 +65,22 @@ def render_contact_info(plant_name, contacts):
         st.markdown("  ".join(parts))
     contacts_parts = []
     if info.get("persoana_comercial"):
-        contacts_parts.append(f"💼 {info['persoana_comercial']} {info.get('tel_comercial', '')}")
+        contacts_parts.append(f"💼 {info['persoana_comercial']} {info.get('tel_comercial','')}")
     if info.get("contact_tehnic"):
-        contacts_parts.append(f"🔧 {info['contact_tehnic']} {info.get('tel_tehnic', '')}")
+        contacts_parts.append(f"🔧 {info['contact_tehnic']} {info.get('tel_tehnic','')}")
     if info.get("contact_om"):
-        contacts_parts.append(f"🛠 {info['contact_om']} {info.get('tel_om', '')}")
+        contacts_parts.append(f"🛠️ {info['contact_om']} {info.get('tel_om','')}")
     if contacts_parts:
         st.caption(" | ".join(contacts_parts))
+
+# Supabase Configuration - Read from Streamlit Secrets
+try:
+    SUPABASE_URL = st.secrets["supabase"]["url"]
+    SUPABASE_KEY = st.secrets["supabase"]["key"]
+except Exception as e:
+    st.error(f"⚠️ Secrets not configured! Go to Settings → Secrets and add Supabase credentials")
+    st.write(f"Error: {e}")
+    st.stop()
 
 
 # ============================================================================
