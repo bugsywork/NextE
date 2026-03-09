@@ -5,6 +5,8 @@ Enhanced monitoring: staleness alerts, delta metrics, delay visibility, search
 """
 
 import streamlit as st
+import os
+import pandas as pd
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
@@ -32,6 +34,51 @@ st.set_page_config(
 
 # Auto-refresh every 60 seconds (60000 milliseconds)
 st_autorefresh(interval=60 * 1000, key="dashboard_refresh")
+
+# ============================================================================
+# PLANT CONTACTS
+# ============================================================================
+
+@st.cache_data(ttl=300)
+def load_contacts():
+    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plant_contacts.csv")
+    if not os.path.exists(csv_path):
+        return {}
+    try:
+        df = pd.read_csv(csv_path, sep="\t", dtype=str).fillna("")
+        return {row["screen_name"]: row for _, row in df.iterrows()}
+    except Exception:
+        return {}
+
+def render_contact_info(plant_name, contacts):
+    info = contacts.get(plant_name)
+    if not info:
+        return
+    parts = []
+    if info.get("alias_pvpp"):
+        parts.append(f"📌 **{info['alias_pvpp']}**")
+    if info.get("Link"):
+        parts.append(f"[🔗 Platform]({info['Link']})")
+    st.markdown("  ".join(parts) if parts else "")
+    cols = st.columns(3)
+    with cols[0]:
+        if info.get("contact_tehnic"):
+            st.caption(f"🔧 **Tehnic**")
+            st.caption(f"{info['contact_tehnic']}")
+            if info.get("tel_tehnic"):
+                st.caption(f"📞 {info['tel_tehnic']}")
+    with cols[1]:
+        if info.get("contact_om"):
+            st.caption(f"⚙️ **O&M**")
+            st.caption(f"{info['contact_om']}")
+            if info.get("tel_om"):
+                st.caption(f"📞 {info['tel_om']}")
+    with cols[2]:
+        if info.get("persoana_comercial"):
+            st.caption(f"💼 **Comercial**")
+            st.caption(f"{info['persoana_comercial']}")
+            if info.get("tel_comercial"):
+                st.caption(f"📞 {info['tel_comercial']}")
 
 # Supabase Configuration - Read from Streamlit Secrets
 try:
@@ -383,22 +430,31 @@ def main():
         if total_problems > 0:
             st.markdown("---")
             st.markdown(f"### ⚠️ Plants with Issues ({total_problems})")
+            contacts = load_contacts()
             if critical_plants:
                 st.markdown("#### 🔴 Critical Issues")
                 for p in critical_plants:
-                    st.error(f"**{p['name']}**"); st.markdown(f"> {p['status']}")
+                    st.error(f"**{p['name']}**")
+                    st.markdown(f"> {p['status']}")
+                    render_contact_info(p['name'], contacts)
             if major_plants:
                 st.markdown("#### 🟠 Major Issues")
                 for p in major_plants:
-                    st.warning(f"**{p['name']}**"); st.markdown(f"> {p['status']}")
+                    st.warning(f"**{p['name']}**")
+                    st.markdown(f"> {p['status']}")
+                    render_contact_info(p['name'], contacts)
             if warning_plants:
                 st.markdown("#### 🔵 Warnings")
                 for p in warning_plants:
-                    st.info(f"**{p['name']}**"); st.markdown(f"> {p['status']}")
+                    st.info(f"**{p['name']}**")
+                    st.markdown(f"> {p['status']}")
+                    render_contact_info(p['name'], contacts)
             if delay_plants:
                 st.markdown("#### ⏱️ Data Delays")
                 for p in delay_plants:
-                    st.info(f"⏱️ **{p['name']}**"); st.markdown(f"> {p['status']}")
+                    st.info(f"⏱️ **{p['name']}**")
+                    st.markdown(f"> {p['status']}")
+                    render_contact_info(p['name'], contacts)
         else:
             st.success("✅ All plants operating normally!")
 
