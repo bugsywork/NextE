@@ -43,13 +43,11 @@ st_autorefresh(interval=60 * 1000, key="dashboard_refresh")
 def load_contacts():
     try:
         df = pd.read_csv("plant_contacts.csv", sep=None, engine="python", dtype=str).fillna("")
+        st.write(f"CSV columns: {df.columns.tolist()}")
+        st.write(f"CSV rows: {len(df)}")
         return {row["screen_name"]: row for _, row in df.iterrows()}
-    except Exception:
-        return {}
-    try:
-        df = pd.read_csv(csv_path, sep=None, engine="python", dtype=str).fillna("")
-        return {row["screen_name"]: row for _, row in df.iterrows()}
-    except Exception:
+    except Exception as e:
+        st.write(f"CSV error: {e}")
         return {}
 
 def render_contact_info(plant_name, contacts):
