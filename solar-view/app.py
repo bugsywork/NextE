@@ -51,7 +51,7 @@ def load_contacts():
 
 def render_contact_info(plant_name, contacts):
     info = contacts.get(plant_name)
-    if not info:
+    if info is None:
         return
     parts = []
     if info.get("alias_pvpp"):
