@@ -494,7 +494,7 @@ def main():
             st.warning("🔒 Acces restricționat")
             pwd = st.text_input("Parolă:", type="password", key="curtail_pwd")
             if st.button("Autentificare", key="curtail_login"):
-                if pwd == st.secrets.get("curtail_password", "solar2024"):
+                if pwd == st.secrets["curtail_password"]:
                     st.session_state["curtail_authenticated"] = True
                     st.rerun()
                 else:
