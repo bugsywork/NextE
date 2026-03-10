@@ -1051,11 +1051,12 @@ District 5, 050881, Bucharest, Romania"""
                 import smtplib
                 from email.mime.text import MIMEText
                 from email.mime.multipart import MIMEMultipart
+                from credentials import get_credentials
 
-                email_user = st.secrets["email"]["user"]
-                email_pass = st.secrets["email"]["password"]
-                smtp_host  = st.secrets["email"]["smtp_host"]
-                smtp_port  = int(st.secrets["email"]["smtp_port"])
+                email_user = get_credentials("email", "user")
+                email_pass = get_credentials("email", "password")
+                smtp_host  = get_credentials("email", "smtp_host")
+                smtp_port  = int(get_credentials("email", "smtp_port"))
 
                 msg = MIMEMultipart()
                 msg["From"]    = email_user
