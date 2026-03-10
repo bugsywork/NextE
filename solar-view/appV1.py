@@ -486,21 +486,6 @@ def main():
     with tab2:
         st.markdown("### ⚡ Curtailment Control")
 
-        # Password protection
-        if "curtail_authenticated" not in st.session_state:
-            st.session_state["curtail_authenticated"] = False
-
-        if not st.session_state["curtail_authenticated"]:
-            st.warning("🔒 Acces restricționat")
-            pwd = st.text_input("Parolă:", type="password", key="curtail_pwd")
-            if st.button("Autentificare", key="curtail_login"):
-                if pwd == st.secrets.get("curtail_password", "solar2024"):
-                    st.session_state["curtail_authenticated"] = True
-                    st.rerun()
-                else:
-                    st.error("❌ Parolă incorectă")
-            st.stop()
-
         ALL_PLANTS = [
             "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
             "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
