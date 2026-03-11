@@ -156,34 +156,35 @@ def get_status_from_supabase():
 
 @st.cache_data(ttl=60)
 def get_delay_status():
-    """Read delay status from solar_plants_status, parse minutes from status_text."""
-    import re
+    """Calculate data freshness per alias_name live from fs_power_master."""
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        bucharest_tz = ZoneInfo("Europe/Bucharest")
+        now_local = datetime.now(bucharest_tz).replace(tzinfo=None)
 
-        # Get latest timestamp
-        ts_result = supabase.table('solar_plants_status')            .select('timestamp')            .order('timestamp', desc=True)            .limit(1)            .execute()
-        if not ts_result.data:
-            return []
-        latest_ts = ts_result.data[0]['timestamp']
-
-        # Get all plants at latest timestamp
-        result = supabase.table('solar_plants_status')            .select('plant_name,status_text,severity')            .eq('timestamp', latest_ts)            .execute()
+        # Fetch latest ts_local per alias_name (last 24h to keep query small)
+        since = (now_local - timedelta(hours=24)).isoformat()
+        result = supabase.table('fs_power_master')            .select('alias_name,ts_local')            .gte('ts_local', since)            .order('ts_local', desc=True)            .execute()
 
         if not result.data:
             return []
 
-        delay_list = []
+        # Keep latest ts per alias_name
+        latest = {}
         for row in result.data:
-            status_text = row.get('status_text', '') or ''
-            plant_name = row.get('plant_name', '')
+            alias = row.get('alias_name', '')
+            ts_str = row.get('ts_local', '')
+            if alias and ts_str and alias not in latest:
+                try:
+                    latest[alias] = pd.to_datetime(ts_str)
+                except:
+                    pass
 
-            # Extract delay minutes from status_text: "delay (16m)" or "DELAY (121m)"
-            match = re.search(r'[Dd][Ee][Ll][Aa][Yy]\s*\((\d+)m\)', status_text)
-            if not match:
+        delay_list = []
+        for alias, last_ts in latest.items():
+            if pd.isna(last_ts):
                 continue
-
-            age_min = int(match.group(1))
+            age_min = (now_local - last_ts).total_seconds() / 60.0
             if age_min > 60:
                 level = 'critical'
             elif age_min > 30:
@@ -192,11 +193,11 @@ def get_delay_status():
                 level = 'minor'
             else:
                 level = 'ok'
-
             delay_list.append({
-                'name': plant_name,
-                'age_min': age_min,
+                'name': alias,
+                'age_min': round(age_min),
                 'level': level,
+                'last_ts': last_ts.strftime('%H:%M:%S')
             })
 
         delay_list.sort(key=lambda x: x['age_min'], reverse=True)
@@ -450,7 +451,7 @@ def main():
                 emoji_delay = {'minor': '🟡', 'major': '🟠', 'critical': '🔴'}
                 for d in delayed:
                     e = emoji_delay.get(d['level'], '⏱️')
-                    st.markdown(f"{e} **{d['name']}** — {d['age_min']} min")
+                    st.markdown(f"{e} **{d['name']}** — {d['age_min']} min (ultimul: {d['last_ts']})")
         else:
             st.success("✅ Toate datele sunt fresh!")
 
@@ -467,11 +468,11 @@ def main():
         # ====================================================================
 
         st.markdown("---")
-        st.markdown("### 📈 Status Distribution")
-        pie_col1, pie_col2 = st.columns(2)
+        col_chart, col_legend = st.columns([3, 1])
 
-        with pie_col1:
-            st.markdown("**⚡ Production**")
+        with col_chart:
+            st.markdown("### 📈 Status Distribution")
+
             labels, values, colors = [], [], []
             if len(ok_plants) > 0:
                 labels.append(f"OK ({len(ok_plants)})"); values.append(len(ok_plants)); colors.append("#00B050")
@@ -481,36 +482,21 @@ def main():
                 labels.append(f"Major ({len(major_plants)})"); values.append(len(major_plants)); colors.append("#FFC000")
             if len(warning_plants) > 0:
                 labels.append(f"Warning ({len(warning_plants)})"); values.append(len(warning_plants)); colors.append("#0070C0")
-            if labels:
-                fig1 = go.Figure(data=[go.Pie(
-                    labels=labels, values=values, marker=dict(colors=colors),
-                    textinfo='label+percent', hovertemplate='%{label}<br>%{percent}<extra></extra>', hole=0.3
-                )])
-                fig1.update_layout(showlegend=False, height=320, margin=dict(t=10, b=10, l=10, r=10))
-                st.plotly_chart(fig1, use_container_width=True)
+            # delay removed from production pie - shown separately above
 
-        with pie_col2:
-            st.markdown("**⏱️ Data Freshness**")
-            d_ok2    = len([d for d in delay_list if d['level'] == 'ok'])
-            d_minor2 = len([d for d in delay_list if d['level'] == 'minor'])
-            d_major2 = len([d for d in delay_list if d['level'] == 'major'])
-            d_crit2  = len([d for d in delay_list if d['level'] == 'critical'])
-            dl, dv, dc = [], [], []
-            if d_ok2 > 0:
-                dl.append(f"Fresh ({d_ok2})"); dv.append(d_ok2); dc.append("#00B050")
-            if d_minor2 > 0:
-                dl.append(f"Minor ({d_minor2})"); dv.append(d_minor2); dc.append("#FFFF00")
-            if d_major2 > 0:
-                dl.append(f"Major ({d_major2})"); dv.append(d_major2); dc.append("#FFC000")
-            if d_crit2 > 0:
-                dl.append(f"Critical ({d_crit2})"); dv.append(d_crit2); dc.append("#FF0000")
-            if dl:
-                fig2 = go.Figure(data=[go.Pie(
-                    labels=dl, values=dv, marker=dict(colors=dc),
-                    textinfo='label+percent', hovertemplate='%{label}<br>%{percent}<extra></extra>', hole=0.3
-                )])
-                fig2.update_layout(showlegend=False, height=320, margin=dict(t=10, b=10, l=10, r=10))
-                st.plotly_chart(fig2, use_container_width=True)
+            fig = go.Figure(data=[go.Pie(
+                labels=labels, values=values, marker=dict(colors=colors),
+                textinfo='label+percent', hovertemplate='%{label}<br>%{percent}<extra></extra>', hole=0.3
+            )])
+            fig.update_layout(showlegend=False, height=400, margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_legend:
+            st.markdown("### 📋 Legend")
+            st.markdown("🟢 **OK**"); st.caption("Normal operation")
+            st.markdown("🔴 **Critical**"); st.caption("No data / No fetch")
+            st.markdown("🟠 **Major**"); st.caption("Recovery from zero")
+            st.markdown("🔵 **Warning**"); st.caption("First suspect issue")
 
 
         # ====================================================================
