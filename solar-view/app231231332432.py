@@ -412,11 +412,12 @@ def main():
         # ====================================================================
         st.markdown("### ⚡ Production Status")
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
 
         delta_ok       = len(ok_plants)       - count_severity(plants_prev, 'ok')       if plants_prev else None
         delta_critical = len(critical_plants) - count_severity(plants_prev, 'critical') if plants_prev else None
         delta_major    = len(major_plants)    - count_severity(plants_prev, 'major')    if plants_prev else None
+        delta_warning  = len(warning_plants)  - count_severity(plants_prev, 'warning')  if plants_prev else None
 
         with col1:
             st.metric(label="🟢 OK", value=len(ok_plants), delta=delta_ok, delta_color="normal")
@@ -424,6 +425,8 @@ def main():
             st.metric(label="🔴 Critical", value=len(critical_plants), delta=delta_critical, delta_color="inverse")
         with col3:
             st.metric(label="🟠 Major", value=len(major_plants), delta=delta_major, delta_color="inverse")
+        with col4:
+            st.metric(label="🔵 Warning", value=len(warning_plants), delta=delta_warning, delta_color="inverse")
 
         # ====================================================================
         # OVERVIEW 2: DATA FRESHNESS
@@ -446,7 +449,18 @@ def main():
         with dc4:
             st.metric(label="🔴 Critical (>60m)", value=d_crit)
 
-
+        delayed = [d for d in delay_list if d['level'] != 'ok']
+        if delayed:
+            contacts = load_contacts()
+            with st.expander(f"⏱️ {len(delayed)} parcuri cu delay", expanded=(d_crit > 0)):
+                emoji_delay = {'warning': '🟡', 'major': '🟠', 'critical': '🔴'}
+                for d in delayed:
+                    e = emoji_delay.get(d['level'], '⏱️')
+                    st.markdown(f"{e} **{d['name']}** — {d['age_min']} min")
+                    render_contact_info(d['name'], contacts)
+                    st.markdown("")
+        else:
+            st.success("✅ Toate datele sunt fresh!")
 
         if data_age_minutes < 1:
             age_label = "acum câteva secunde"
@@ -511,66 +525,55 @@ def main():
         # PROBLEMS LIST - combined production + delay
         # ====================================================================
 
-        # Build combined issues - merge production + delay per plant
-        # delay_by_name: screen_name -> delay dict
-        delay_by_name = {d['name']: d for d in delay_list if d['level'] != 'ok'}
+        # Build delay issues list for combined view
+        delay_issues = {
+            'critical': [d for d in delay_list if d['level'] == 'critical'],
+            'major':    [d for d in delay_list if d['level'] == 'major'],
+            'warning':  [d for d in delay_list if d['level'] == 'warning'],
+        }
+        total_delay_issues = sum(len(v) for v in delay_issues.values())
+        total_all_issues = total_problems + total_delay_issues
 
-        # All plant names that have any issue
-        all_issue_names = set()
-        for p in critical_plants + major_plants + warning_plants:
-            all_issue_names.add(p['name'])
-        for d in delay_by_name.values():
-            all_issue_names.add(d['name'])
-
-        # Build combined issue per plant
-        # severity order: critical > major > warning (from production; delay adds to description)
-        prod_by_name = {p['name']: p for p in critical_plants + major_plants + warning_plants}
-
-        def combined_severity(name):
-            prod = prod_by_name.get(name)
-            delay = delay_by_name.get(name)
-            sev_order = {'critical': 0, 'major': 1, 'warning': 2}
-            prod_sev = prod['severity'] if prod else None
-            delay_sev = delay['level'] if delay else None
-            # Pick highest severity
-            candidates = [s for s in [prod_sev, delay_sev] if s]
-            if not candidates:
-                return 'ok'
-            return min(candidates, key=lambda s: sev_order.get(s, 99))
-
-        sorted_issues = sorted(all_issue_names,
-            key=lambda n: ({'critical': 0, 'major': 1, 'warning': 2}.get(combined_severity(n), 99), n))
-
-        if sorted_issues:
+        if total_all_issues > 0:
             st.markdown("---")
-            st.markdown(f"### ⚠️ Plants with Issues ({len(sorted_issues)})")
+            st.markdown(f"### ⚠️ Plants with Issues ({total_all_issues})")
             contacts = load_contacts()
-            sev_emoji = {'critical': '🔴', 'major': '🟠', 'warning': '🔵'}
-            sev_fn = {'critical': st.error, 'major': st.warning, 'warning': st.info}
 
-            prev_sev = None
-            for name in sorted_issues:
-                sev = combined_severity(name)
-                if sev != prev_sev:
-                    sev_label = {'critical': '🔴 Critical', 'major': '🟠 Major', 'warning': '🔵 Warning'}.get(sev, sev)
-                    st.markdown(f"#### {sev_label}")
-                    prev_sev = sev
+            # CRITICAL - production first, then delay
+            crit_prod = critical_plants
+            crit_delay = delay_issues['critical']
+            if crit_prod or crit_delay:
+                st.markdown("#### 🔴 Critical")
+                for p in crit_prod:
+                    st.error(f"**{p['name']}** — {p['status']}")
+                    render_contact_info(p['name'], contacts)
+                for d in crit_delay:
+                    st.error(f"**{d['name']}** — date cu {d['age_min']} min întârziere")
+                    render_contact_info(d['name'], contacts)
 
-                prod = prod_by_name.get(name)
-                delay = delay_by_name.get(name)
+            # MAJOR
+            maj_prod = major_plants
+            maj_delay = delay_issues['major']
+            if maj_prod or maj_delay:
+                st.markdown("#### 🟠 Major")
+                for p in maj_prod:
+                    st.warning(f"**{p['name']}** — {p['status']}")
+                    render_contact_info(p['name'], contacts)
+                for d in maj_delay:
+                    st.warning(f"**{d['name']}** — date cu {d['age_min']} min întârziere")
+                    render_contact_info(d['name'], contacts)
 
-                # Build description line
-                parts = []
-                if prod:
-                    parts.append(prod['status'])
-                if delay:
-                    parts.append(f"delay {delay['age_min']} min")
-                desc = " | ".join(parts)
-
-                display_fn = sev_fn.get(sev, st.info)
-                display_fn(f"**{name}** — {desc}")
-                render_contact_info(name, contacts)
-                st.markdown("")
+            # WARNING
+            warn_prod = warning_plants
+            warn_delay = delay_issues['warning']
+            if warn_prod or warn_delay:
+                st.markdown("#### 🔵 Warning")
+                for p in warn_prod:
+                    st.info(f"**{p['name']}** — {p['status']}")
+                    render_contact_info(p['name'], contacts)
+                for d in warn_delay:
+                    st.info(f"**{d['name']}** — date cu {d['age_min']} min întârziere")
+                    render_contact_info(d['name'], contacts)
 
         else:
             st.success("✅ All plants operating normally!")
