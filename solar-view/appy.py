@@ -189,18 +189,19 @@ def get_delay_status():
         for row in result.data:
             status_text = row.get('status_text', '') or ''
             plant_name = row.get('plant_name', '')
-            # Match new format: DELAY_CRITICAL (Xm) / delay_major (Xm) / delay_warning (Xm)
-            match = re.search(r'(DELAY_CRITICAL|delay_major|delay_warning)\s*\((\d+)m\)', status_text)
+            match = re.search(r'[Dd][Ee][Ll][Aa][Yy]\s*\((\d+)m\)', status_text)
             if not match:
+                # No delay text = fetch is working fine, skip
                 continue
-            kind = match.group(1)
-            age_min = int(match.group(2))
-            if kind == 'DELAY_CRITICAL':
+            age_min = int(match.group(1))
+            if age_min > 60:
                 level = 'critical'
-            elif kind == 'delay_major':
+            elif age_min > 30:
                 level = 'major'
-            else:
+            elif age_min > 15:
                 level = 'warning'
+            else:
+                level = 'ok'
             delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
 
         delay_list.sort(key=lambda x: x['age_min'], reverse=True)
