@@ -408,44 +408,46 @@ def main():
         # ====================================================================
 
         # ====================================================================
-        # OVERVIEW - combined production + freshness, worst case per plant
+        # OVERVIEW 1: PRODUCTION STATUS
         # ====================================================================
-        st.markdown("### 📊 Status Overview")
-
-        delay_list = get_delay_status()
-
-        # Build combined severity per plant name
-        delay_by_name = {d['name']: d for d in delay_list if d['level'] != 'ok'}
-        prod_by_name  = {p['name']: p for p in critical_plants + major_plants + warning_plants}
-
-        def combined_severity(name):
-            sev_order = {'critical': 0, 'major': 1, 'warning': 2}
-            prod = prod_by_name.get(name)
-            delay = delay_by_name.get(name)
-            candidates = []
-            if prod:
-                candidates.append(prod['severity'])
-            if delay:
-                candidates.append(delay['level'])
-            if not candidates:
-                return 'ok'
-            return min(candidates, key=lambda s: sev_order.get(s, 99))
-
-        all_names = [p['name'] for p in plants]
-        n_critical = len([n for n in all_names if combined_severity(n) == 'critical'])
-        n_major    = len([n for n in all_names if combined_severity(n) == 'major'])
-        n_warning  = len([n for n in all_names if combined_severity(n) == 'warning'])
-        n_ok       = len(all_names) - n_critical - n_major - n_warning
+        st.markdown("### ⚡ Production Status")
 
         col1, col2, col3, col4 = st.columns(4)
+
+        delta_ok       = len(ok_plants)       - count_severity(plants_prev, 'ok')       if plants_prev else None
+        delta_critical = len(critical_plants) - count_severity(plants_prev, 'critical') if plants_prev else None
+        delta_major    = len(major_plants)    - count_severity(plants_prev, 'major')    if plants_prev else None
+        delta_warning  = len(warning_plants)  - count_severity(plants_prev, 'warning')  if plants_prev else None
+
         with col1:
-            st.metric(label="🟢 OK", value=n_ok)
+            st.metric(label="🟢 OK", value=len(ok_plants), delta=delta_ok, delta_color="normal")
         with col2:
-            st.metric(label="🔴 Critical", value=n_critical)
+            st.metric(label="🔴 Critical", value=len(critical_plants), delta=delta_critical, delta_color="inverse")
         with col3:
-            st.metric(label="🟠 Major", value=n_major)
+            st.metric(label="🟠 Major", value=len(major_plants), delta=delta_major, delta_color="inverse")
         with col4:
-            st.metric(label="🔵 Warning", value=n_warning)
+            st.metric(label="🔵 Warning", value=len(warning_plants), delta=delta_warning, delta_color="inverse")
+
+        # ====================================================================
+        # OVERVIEW 2: DATA FRESHNESS
+        # ====================================================================
+        st.markdown("### ⏱️ Data Freshness")
+
+        delay_list = get_delay_status()
+        d_ok      = len([d for d in delay_list if d['level'] == 'ok'])
+        d_warning = len([d for d in delay_list if d['level'] == 'warning'])
+        d_major   = len([d for d in delay_list if d['level'] == 'major'])
+        d_crit    = len([d for d in delay_list if d['level'] == 'critical'])
+
+        dc1, dc2, dc3, dc4 = st.columns(4)
+        with dc1:
+            st.metric(label="🟢 Fresh (≤15m)", value=d_ok)
+        with dc2:
+            st.metric(label="🟡 Warning (>15m)", value=d_warning)
+        with dc3:
+            st.metric(label="🟠 Major (>30m)", value=d_major)
+        with dc4:
+            st.metric(label="🔴 Critical (>60m)", value=d_crit)
 
 
 
@@ -461,7 +463,21 @@ def main():
         # PIE CHART
         # ====================================================================
 
+        # Build delay lookup and combined severity (used in pie + issues list)
+        prod_by_name = {p['name']: p for p in critical_plants + major_plants + warning_plants}
 
+        def combined_severity(name):
+            prod = prod_by_name.get(name)
+            delay = delay_by_name.get(name)
+            sev_order = {'critical': 0, 'major': 1, 'warning': 2}
+            prod_sev = prod['severity'] if prod else None
+            delay_sev = delay['level'] if delay else None
+            # Pick highest severity
+            candidates = [s for s in [prod_sev, delay_sev] if s]
+            if not candidates:
+                return 'ok'
+            return min(candidates, key=lambda s: sev_order.get(s, 99))
+        delay_by_name = {d['name']: d for d in delay_list if d['level'] != 'ok'}
 
         st.markdown("---")
         st.markdown("### 📈 Status Distribution")
