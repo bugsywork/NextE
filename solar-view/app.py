@@ -1236,15 +1236,25 @@ def fetch_forecast(uuid, date_from, date_to):
             timeout=15
         )
         data = resp.json()
+        # data_format=split returneaza {'index': [...], 'columns': [...], 'data': [...]}
+        if 'index' in data and 'columns' in data and 'data' in data:
+            df = pd.DataFrame(data['data'], columns=data['columns'], index=data['index'])
+            df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+            df.index = df.index.tz_convert('Europe/Bucharest').tz_localize(None)
+            df = df.reset_index().rename(columns={'index': 'ts', 'pac': 'forecast_kw'})
+            if 'forecast_kw' not in df.columns and 'pac' in df.columns:
+                df = df.rename(columns={'pac': 'forecast_kw'})
+            df = df[['ts', 'forecast_kw']]
+            df['forecast_kw'] = pd.to_numeric(df['forecast_kw'], errors='coerce')
+            df = df[(df['ts'].dt.date >= date_from) & (df['ts'].dt.date <= date_to)]
+            return df[df['forecast_kw'].notna()]
         if not data.get('pac'):
-            st.error(f"Steadysun no pac field: {list(data.keys())}")
+            st.error(f"Steadysun format necunoscut: {list(data.keys())}")
             return pd.DataFrame()
         timestamps = data['pac'].get('timestamps', [])
         values = data['pac'].get('values', [])
         if not timestamps:
-            st.error("Steadysun: timestamps goale")
             return pd.DataFrame()
-        # timestamps in milliseconds
         df = pd.DataFrame({'ts': pd.to_datetime(timestamps, unit='ms', utc=True), 'forecast_kw': values})
         df['ts'] = df['ts'].dt.tz_convert('Europe/Bucharest').dt.tz_localize(None)
         df = df[(df['ts'].dt.date >= date_from) & (df['ts'].dt.date <= date_to)]
