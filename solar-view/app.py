@@ -163,7 +163,6 @@ def get_delay_status():
        calculate age live from fs_power_master.
     """
     import re
-    from datetime import timedelta
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         bucharest_tz = ZoneInfo("Europe/Bucharest")
@@ -186,60 +185,24 @@ def get_delay_status():
             return []
 
         delay_list = []
-        need_live_check = []
 
         for row in result.data:
             status_text = row.get('status_text', '') or ''
             plant_name = row.get('plant_name', '')
             match = re.search(r'[Dd][Ee][Ll][Aa][Yy]\s*\((\d+)m\)', status_text)
-            if match:
-                age_min = int(match.group(1))
-                if age_min > 60:
-                    level = 'critical'
-                elif age_min > 30:
-                    level = 'major'
-                elif age_min > 15:
-                    level = 'minor'
-                else:
-                    level = 'ok'
-                delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
+            if not match:
+                # No delay text = fetch is working fine, skip
+                continue
+            age_min = int(match.group(1))
+            if age_min > 60:
+                level = 'critical'
+            elif age_min > 30:
+                level = 'major'
+            elif age_min > 15:
+                level = 'minor'
             else:
-                need_live_check.append(plant_name)
-
-        # Live check from fs_power_master for plants without delay text
-        if need_live_check:
-            since = (now_local - timedelta(hours=24)).isoformat()
-            live_result = supabase.table('fs_power_master')\
-                .select('plant_name,alias_name,ts_local')\
-                .gte('ts_local', since)\
-                .order('ts_local', desc=True)\
-                .execute()
-
-            latest_per_plant = {}
-            for r in (live_result.data or []):
-                pn = r.get('plant_name') or r.get('alias_name') or ''
-                ts_str = r.get('ts_local', '')
-                if pn and ts_str and pn not in latest_per_plant:
-                    try:
-                        latest_per_plant[pn] = pd.to_datetime(ts_str)
-                    except Exception:
-                        pass
-
-            for plant_name in need_live_check:
-                last_ts = latest_per_plant.get(plant_name)
-                if last_ts is None or pd.isna(last_ts):
-                    age_min = 999
-                else:
-                    age_min = int((now_local - last_ts).total_seconds() / 60)
-                if age_min > 60:
-                    level = 'critical'
-                elif age_min > 30:
-                    level = 'major'
-                elif age_min > 15:
-                    level = 'minor'
-                else:
-                    level = 'ok'
-                delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
+                level = 'ok'
+            delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
 
         delay_list.sort(key=lambda x: x['age_min'], reverse=True)
         return delay_list
