@@ -190,32 +190,18 @@ def get_delay_status():
             status_text = row.get('status_text', '') or ''
             plant_name = row.get('plant_name', '')
             # Match new format: DELAY_CRITICAL (Xm) / delay_major (Xm) / delay_warning (Xm)
-            # New format: DELAY_CRITICAL/delay_major/delay_warning
             match = re.search(r'(DELAY_CRITICAL|delay_major|delay_warning)\s*\((\d+)m\)', status_text)
-            if match:
-                kind = match.group(1)
-                age_min = int(match.group(2))
-                if kind == 'DELAY_CRITICAL':
-                    level = 'critical'
-                elif kind == 'delay_major':
-                    level = 'major'
-                else:
-                    level = 'warning'
-                delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
+            if not match:
                 continue
-            # Legacy format: DELAY (Xm) / delay (Xm) - apply same thresholds
-            match = re.search(r'[Dd][Ee][Ll][Aa][Yy]\s*\((\d+)m\)', status_text)
-            if match:
-                age_min = int(match.group(1))
-                if age_min >= 30:
-                    level = 'critical'
-                elif age_min >= 16:
-                    level = 'major'
-                elif age_min >= 8:
-                    level = 'warning'
-                else:
-                    continue
-                delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
+            kind = match.group(1)
+            age_min = int(match.group(2))
+            if kind == 'DELAY_CRITICAL':
+                level = 'critical'
+            elif kind == 'delay_major':
+                level = 'major'
+            else:
+                level = 'warning'
+            delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
 
         delay_list.sort(key=lambda x: x['age_min'], reverse=True)
         return delay_list
