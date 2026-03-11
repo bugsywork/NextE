@@ -451,14 +451,11 @@ def main():
 
         delayed = [d for d in delay_list if d['level'] != 'ok']
         if delayed:
-            contacts = load_contacts()
             with st.expander(f"⏱️ {len(delayed)} parcuri cu delay", expanded=(d_crit > 0)):
                 emoji_delay = {'minor': '🟡', 'major': '🟠', 'critical': '🔴'}
                 for d in delayed:
                     e = emoji_delay.get(d['level'], '⏱️')
                     st.markdown(f"{e} **{d['name']}** — {d['age_min']} min")
-                    render_contact_info(d['name'], contacts)
-                    st.markdown("")
         else:
             st.success("✅ Toate datele sunt fresh!")
 
