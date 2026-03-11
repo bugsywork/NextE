@@ -412,12 +412,11 @@ def main():
         # ====================================================================
         st.markdown("### ⚡ Production Status")
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
 
         delta_ok       = len(ok_plants)       - count_severity(plants_prev, 'ok')       if plants_prev else None
         delta_critical = len(critical_plants) - count_severity(plants_prev, 'critical') if plants_prev else None
         delta_major    = len(major_plants)    - count_severity(plants_prev, 'major')    if plants_prev else None
-        delta_warning  = len(warning_plants)  - count_severity(plants_prev, 'warning')  if plants_prev else None
 
         with col1:
             st.metric(label="🟢 OK", value=len(ok_plants), delta=delta_ok, delta_color="normal")
@@ -425,8 +424,6 @@ def main():
             st.metric(label="🔴 Critical", value=len(critical_plants), delta=delta_critical, delta_color="inverse")
         with col3:
             st.metric(label="🟠 Major", value=len(major_plants), delta=delta_major, delta_color="inverse")
-        with col4:
-            st.metric(label="🔵 Warning", value=len(warning_plants), delta=delta_warning, delta_color="inverse")
 
         # ====================================================================
         # OVERVIEW 2: DATA FRESHNESS
@@ -463,7 +460,70 @@ def main():
         # PIE CHART
         # ====================================================================
 
-        # Build delay lookup and combined severity (used in pie + issues list)
+        st.markdown("---")
+        st.markdown("### 📈 Status Distribution")
+        pie_col1, pie_col2 = st.columns(2)
+
+        with pie_col1:
+            st.markdown("**⚡ Production**")
+            labels, values, colors = [], [], []
+            if len(ok_plants) > 0:
+                labels.append(f"OK ({len(ok_plants)})"); values.append(len(ok_plants)); colors.append("#00B050")
+            if len(critical_plants) > 0:
+                labels.append(f"Critical ({len(critical_plants)})"); values.append(len(critical_plants)); colors.append("#FF0000")
+            if len(major_plants) > 0:
+                labels.append(f"Major ({len(major_plants)})"); values.append(len(major_plants)); colors.append("#FFC000")
+            if len(warning_plants) > 0:
+                labels.append(f"Warning ({len(warning_plants)})"); values.append(len(warning_plants)); colors.append("#0070C0")
+            if labels:
+                fig1 = go.Figure(data=[go.Pie(
+                    labels=labels, values=values, marker=dict(colors=colors),
+                    textinfo='label+percent', hovertemplate='%{label}<br>%{percent}<extra></extra>', hole=0.3
+                )])
+                fig1.update_layout(showlegend=False, height=320, margin=dict(t=10, b=10, l=10, r=10))
+                st.plotly_chart(fig1, use_container_width=True)
+
+        with pie_col2:
+            st.markdown("**⏱️ Data Freshness**")
+            d_ok2    = len([d for d in delay_list if d['level'] == 'ok'])
+            d_warning2 = len([d for d in delay_list if d['level'] == 'warning'])
+            d_major2 = len([d for d in delay_list if d['level'] == 'major'])
+            d_crit2  = len([d for d in delay_list if d['level'] == 'critical'])
+            dl, dv, dc = [], [], []
+            if d_ok2 > 0:
+                dl.append(f"Fresh ({d_ok2})"); dv.append(d_ok2); dc.append("#00B050")
+            if d_warning2 > 0:
+                dl.append(f"Warning ({d_warning2})"); dv.append(d_warning2); dc.append("#FFFF00")
+            if d_major2 > 0:
+                dl.append(f"Major ({d_major2})"); dv.append(d_major2); dc.append("#FFC000")
+            if d_crit2 > 0:
+                dl.append(f"Critical ({d_crit2})"); dv.append(d_crit2); dc.append("#FF0000")
+            if dl:
+                fig2 = go.Figure(data=[go.Pie(
+                    labels=dl, values=dv, marker=dict(colors=dc),
+                    textinfo='label+percent', hovertemplate='%{label}<br>%{percent}<extra></extra>', hole=0.3
+                )])
+                fig2.update_layout(showlegend=False, height=320, margin=dict(t=10, b=10, l=10, r=10))
+                st.plotly_chart(fig2, use_container_width=True)
+
+
+        # ====================================================================
+        # PROBLEMS LIST - combined production + delay
+        # ====================================================================
+
+        # Build combined issues - merge production + delay per plant
+        # delay_by_name: screen_name -> delay dict
+        delay_by_name = {d['name']: d for d in delay_list if d['level'] != 'ok'}
+
+        # All plant names that have any issue
+        all_issue_names = set()
+        for p in critical_plants + major_plants + warning_plants:
+            all_issue_names.add(p['name'])
+        for d in delay_by_name.values():
+            all_issue_names.add(d['name'])
+
+        # Build combined issue per plant
+        # severity order: critical > major > warning (from production; delay adds to description)
         prod_by_name = {p['name']: p for p in critical_plants + major_plants + warning_plants}
 
         def combined_severity(name):
@@ -477,54 +537,6 @@ def main():
             if not candidates:
                 return 'ok'
             return min(candidates, key=lambda s: sev_order.get(s, 99))
-        delay_by_name = {d['name']: d for d in delay_list if d['level'] != 'ok'}
-
-        st.markdown("---")
-        st.markdown("### 📈 Status Distribution")
-
-        # Single pie: OK = all plants with no production issue AND no delay issue
-        # others based on worst severity per plant
-        all_plant_names = set(p['name'] for p in plants)
-        issue_names = set(p['name'] for p in critical_plants + major_plants + warning_plants)
-        issue_names.update(d['name'] for d in delay_list if d['level'] != 'ok')
-
-        n_ok = len(all_plant_names - issue_names)
-        n_critical = len([n for n in all_plant_names if combined_severity(n) == 'critical'])
-        n_major    = len([n for n in all_plant_names if combined_severity(n) == 'major'])
-        n_warning  = len([n for n in all_plant_names if combined_severity(n) == 'warning'])
-
-        labels, values, colors = [], [], []
-        if n_ok > 0:
-            labels.append(f"OK ({n_ok})"); values.append(n_ok); colors.append("#00B050")
-        if n_critical > 0:
-            labels.append(f"Critical ({n_critical})"); values.append(n_critical); colors.append("#FF0000")
-        if n_major > 0:
-            labels.append(f"Major ({n_major})"); values.append(n_major); colors.append("#FFC000")
-        if n_warning > 0:
-            labels.append(f"Warning ({n_warning})"); values.append(n_warning); colors.append("#0070C0")
-        if labels:
-            fig = go.Figure(data=[go.Pie(
-                labels=labels, values=values, marker=dict(colors=colors),
-                textinfo='label+percent', hovertemplate='%{label}<br>%{percent}<extra></extra>', hole=0.3
-            )])
-            fig.update_layout(showlegend=False, height=350, margin=dict(t=10, b=10, l=10, r=10))
-            st.plotly_chart(fig, use_container_width=True)
-
-
-        # ====================================================================
-        # PROBLEMS LIST - combined production + delay
-        # ====================================================================
-
-        # Build combined issues - merge production + delay per plant
-
-        # All plant names that have any issue
-        all_issue_names = set()
-        for p in critical_plants + major_plants + warning_plants:
-            all_issue_names.add(p['name'])
-        for d in delay_by_name.values():
-            all_issue_names.add(d['name'])
-
-
 
         sorted_issues = sorted(all_issue_names,
             key=lambda n: ({'critical': 0, 'major': 1, 'warning': 2}.get(combined_severity(n), 99), n))
