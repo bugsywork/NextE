@@ -1164,6 +1164,7 @@ UUID_MAP = {
 
 @st.cache_data(ttl=300)
 def fetch_actuals(alias_names, date_from, date_to):
+    """Fetch actuals by alias_name."""
     try:
         supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
         dt_from = datetime.combine(date_from, datetime.min.time()).isoformat()
@@ -1189,6 +1190,34 @@ def fetch_actuals(alias_names, date_from, date_to):
         st.error(f"Eroare fetch actuals: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=300)
+def fetch_actuals_by_plant(plant_names, date_from, date_to):
+    """Fetch actuals by plant_name (pentru Calafat 1+2+3)."""
+    try:
+        supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+        dt_from = datetime.combine(date_from, datetime.min.time()).isoformat()
+        dt_to = datetime.combine(date_to, datetime.max.time()).isoformat()
+        all_rows = []
+        for plant in plant_names:
+            result = supabase.table('fs_power_master') \
+                .select('ts_local,power_kw') \
+                .eq('plant_name', plant) \
+                .gte('ts_local', dt_from) \
+                .lte('ts_local', dt_to) \
+                .execute()
+            all_rows.extend(result.data)
+        if not all_rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(all_rows)
+        df['ts_local'] = pd.to_datetime(df['ts_local'])
+        df['power_kw'] = pd.to_numeric(df['power_kw'], errors='coerce')
+        df = df.groupby(pd.Grouper(key='ts_local', freq='15min'))['power_kw'].sum().reset_index()
+        df.columns = ['ts', 'power_kw']
+        return df[df['power_kw'].notna()]
+    except Exception as e:
+        st.error(f"Eroare fetch actuals by plant: {e}")
+        return pd.DataFrame()
+
 @st.cache_data(ttl=900)
 def fetch_forecast(uuid, date_from, date_to):
     try:
@@ -1200,21 +1229,27 @@ def fetch_forecast(uuid, date_from, date_to):
             headers={"Authorization": f"Token {token}"},
             params={
                 "horizon": horizon_min, "time_step": 15, "fields": "pac",
-                "data_format": "split", "date_time_format": "iso",
-                "time_stamp_unit": "iso", "precision": 2,
+                "data_format": "split", "date_time_format": "",
+                "time_stamp_unit": "ms", "precision": 2,
                 "format": "json", "field_format": "short_name"
             },
             timeout=15
         )
         data = resp.json()
         if not data.get('pac'):
+            st.error(f"Steadysun no pac field: {list(data.keys())}")
             return pd.DataFrame()
         timestamps = data['pac'].get('timestamps', [])
         values = data['pac'].get('values', [])
-        df = pd.DataFrame({'ts': pd.to_datetime(timestamps, utc=True), 'forecast_kw': values})
+        if not timestamps:
+            st.error("Steadysun: timestamps goale")
+            return pd.DataFrame()
+        # timestamps in milliseconds
+        df = pd.DataFrame({'ts': pd.to_datetime(timestamps, unit='ms', utc=True), 'forecast_kw': values})
         df['ts'] = df['ts'].dt.tz_convert('Europe/Bucharest').dt.tz_localize(None)
         df = df[(df['ts'].dt.date >= date_from) & (df['ts'].dt.date <= date_to)]
-        return df[df['forecast_kw'].notna()]
+        df = df[df['forecast_kw'].notna()]
+        return df
     except Exception as e:
         st.error(f"Eroare fetch forecast: {e}")
         return pd.DataFrame()
@@ -1242,8 +1277,11 @@ def render_forecast_tab(tab):
             if selected_park == "🌍 Toate insumat":
                 all_actuals, all_forecasts = [], []
                 for fs_name, alias_pvpp in PARK_MAP.items():
-                    aliases = CHESHAM_PLANTS if alias_pvpp == 'Chesham_Solar_PVPP' else [fs_name]
-                    df_act = fetch_actuals(aliases, date_from, date_to)
+                    if alias_pvpp == 'Chesham_Solar_PVPP':
+                        # Calafat 1+2+3 - fetch by plant_name
+                        df_act = fetch_actuals_by_plant(CHESHAM_PLANTS, date_from, date_to)
+                    else:
+                        df_act = fetch_actuals([alias_pvpp], date_from, date_to)
                     if not df_act.empty:
                         all_actuals.append(df_act)
                     uuid = UUID_MAP.get(alias_pvpp)
@@ -1256,8 +1294,10 @@ def render_forecast_tab(tab):
                 title = "Toate parcurile insumat"
             else:
                 alias_pvpp = PARK_MAP[selected_park]
-                aliases = CHESHAM_PLANTS if alias_pvpp == 'Chesham_Solar_PVPP' else [selected_park]
-                df_actual = fetch_actuals(aliases, date_from, date_to)
+                if alias_pvpp == 'Chesham_Solar_PVPP':
+                    df_actual = fetch_actuals_by_plant(CHESHAM_PLANTS, date_from, date_to)
+                else:
+                    df_actual = fetch_actuals([alias_pvpp], date_from, date_to)
                 uuid = UUID_MAP.get(alias_pvpp)
                 df_forecast = fetch_forecast(uuid, date_from, date_to) if uuid else pd.DataFrame()
                 title = selected_park
