@@ -153,58 +153,6 @@ def get_status_from_supabase():
         return None, [], [], f"Database error: {str(e)}"
 
 
-
-@st.cache_data(ttl=60)
-def get_delay_status():
-    """Calculate data freshness per alias_name live from fs_power_master."""
-    try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        bucharest_tz = ZoneInfo("Europe/Bucharest")
-        now_local = datetime.now(bucharest_tz).replace(tzinfo=None)
-
-        # Fetch latest ts_local per alias_name (last 24h to keep query small)
-        since = (now_local - timedelta(hours=24)).isoformat()
-        result = supabase.table('fs_power_master')            .select('alias_name,ts_local')            .gte('ts_local', since)            .order('ts_local', desc=True)            .execute()
-
-        if not result.data:
-            return []
-
-        # Keep latest ts per alias_name
-        latest = {}
-        for row in result.data:
-            alias = row.get('alias_name', '')
-            ts_str = row.get('ts_local', '')
-            if alias and ts_str and alias not in latest:
-                try:
-                    latest[alias] = pd.to_datetime(ts_str)
-                except:
-                    pass
-
-        delay_list = []
-        for alias, last_ts in latest.items():
-            if pd.isna(last_ts):
-                continue
-            age_min = (now_local - last_ts).total_seconds() / 60.0
-            if age_min > 60:
-                level = 'critical'
-            elif age_min > 30:
-                level = 'major'
-            elif age_min > 15:
-                level = 'minor'
-            else:
-                level = 'ok'
-            delay_list.append({
-                'name': alias,
-                'age_min': round(age_min),
-                'level': level,
-                'last_ts': last_ts.strftime('%H:%M:%S')
-            })
-
-        delay_list.sort(key=lambda x: x['age_min'], reverse=True)
-        return delay_list
-    except Exception as e:
-        return []
-
 def count_severity(plants_list, severity):
     return len([p for p in plants_list if p['severity'] == severity])
 
@@ -356,16 +304,16 @@ def main():
             return
 
         # ====================================================================
-        # CATEGORIZE BY SEVERITY (production only, exclude delay severity)
+        # CATEGORIZE BY SEVERITY
         # ====================================================================
 
         ok_plants       = [p for p in plants if p['severity'] == 'ok']
         warning_plants  = [p for p in plants if p['severity'] == 'warning']
         major_plants    = [p for p in plants if p['severity'] == 'major']
         critical_plants = [p for p in plants if p['severity'] == 'critical']
-        # delay_plants from solar_plants_status ignored - we use live delay below
+        delay_plants    = [p for p in plants if p['severity'] == 'delay']
 
-        total_problems = len(critical_plants) + len(major_plants) + len(warning_plants)
+        total_problems = len(critical_plants) + len(major_plants) + len(warning_plants) + len(delay_plants)
 
         # ====================================================================
         # DATA STALENESS CHECK
@@ -403,17 +351,15 @@ def main():
         # TOP SUMMARY METRICS WITH DELTA
         # ====================================================================
 
-        # ====================================================================
-        # OVERVIEW 1: PRODUCTION STATUS
-        # ====================================================================
-        st.markdown("### ⚡ Production Status")
+        st.markdown("### 📊 Overview")
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         delta_ok       = len(ok_plants)       - count_severity(plants_prev, 'ok')       if plants_prev else None
         delta_critical = len(critical_plants) - count_severity(plants_prev, 'critical') if plants_prev else None
         delta_major    = len(major_plants)    - count_severity(plants_prev, 'major')    if plants_prev else None
         delta_warning  = len(warning_plants)  - count_severity(plants_prev, 'warning')  if plants_prev else None
+        delta_delay    = len(delay_plants)    - count_severity(plants_prev, 'delay')    if plants_prev else None
 
         with col1:
             st.metric(label="🟢 OK", value=len(ok_plants), delta=delta_ok, delta_color="normal")
@@ -423,37 +369,8 @@ def main():
             st.metric(label="🟠 Major", value=len(major_plants), delta=delta_major, delta_color="inverse")
         with col4:
             st.metric(label="🔵 Warning", value=len(warning_plants), delta=delta_warning, delta_color="inverse")
-
-        # ====================================================================
-        # OVERVIEW 2: DATA FRESHNESS
-        # ====================================================================
-        st.markdown("### ⏱️ Data Freshness")
-
-        delay_list = get_delay_status()
-        d_ok      = len([d for d in delay_list if d['level'] == 'ok'])
-        d_minor   = len([d for d in delay_list if d['level'] == 'minor'])
-        d_major   = len([d for d in delay_list if d['level'] == 'major'])
-        d_crit    = len([d for d in delay_list if d['level'] == 'critical'])
-
-        dc1, dc2, dc3, dc4 = st.columns(4)
-        with dc1:
-            st.metric(label="🟢 Fresh (≤15m)", value=d_ok)
-        with dc2:
-            st.metric(label="🟡 Minor (>15m)", value=d_minor)
-        with dc3:
-            st.metric(label="🟠 Major (>30m)", value=d_major)
-        with dc4:
-            st.metric(label="🔴 Critical (>60m)", value=d_crit)
-
-        delayed = [d for d in delay_list if d['level'] != 'ok']
-        if delayed:
-            with st.expander(f"⏱️ {len(delayed)} parcuri cu delay", expanded=(d_crit > 0)):
-                emoji_delay = {'minor': '🟡', 'major': '🟠', 'critical': '🔴'}
-                for d in delayed:
-                    e = emoji_delay.get(d['level'], '⏱️')
-                    st.markdown(f"{e} **{d['name']}** — {d['age_min']} min (ultimul: {d['last_ts']})")
-        else:
-            st.success("✅ Toate datele sunt fresh!")
+        with col5:
+            st.metric(label="⏱️ Delay", value=len(delay_plants), delta=delta_delay, delta_color="inverse")
 
         if data_age_minutes < 1:
             age_label = "acum câteva secunde"
@@ -482,7 +399,8 @@ def main():
                 labels.append(f"Major ({len(major_plants)})"); values.append(len(major_plants)); colors.append("#FFC000")
             if len(warning_plants) > 0:
                 labels.append(f"Warning ({len(warning_plants)})"); values.append(len(warning_plants)); colors.append("#0070C0")
-            # delay removed from production pie - shown separately above
+            if len(delay_plants) > 0:
+                labels.append(f"Delay ({len(delay_plants)})"); values.append(len(delay_plants)); colors.append("#808080")
 
             fig = go.Figure(data=[go.Pie(
                 labels=labels, values=values, marker=dict(colors=colors),
@@ -497,7 +415,7 @@ def main():
             st.markdown("🔴 **Critical**"); st.caption("No data / No fetch")
             st.markdown("🟠 **Major**"); st.caption("Recovery from zero")
             st.markdown("🔵 **Warning**"); st.caption("First suspect issue")
-
+            st.markdown("⏱️ **Delay**"); st.caption("Data delay only")
 
         # ====================================================================
         # PROBLEMS LIST
@@ -525,9 +443,14 @@ def main():
                     st.info(f"**{p['name']}**")
                     st.markdown(f"> {p['status']}")
                     render_contact_info(p['name'], contacts)
-
+            if delay_plants:
+                st.markdown("#### ⏱️ Data Delays")
+                for p in delay_plants:
+                    st.info(f"⏱️ **{p['name']}**")
+                    st.markdown(f"> {p['status']}")
+                    render_contact_info(p['name'], contacts)
         else:
-            st.success("✅ All plants operating normally (production)!")
+            st.success("✅ All plants operating normally!")
 
         # ====================================================================
         # ALL PLANTS EXPANDABLE
