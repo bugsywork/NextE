@@ -199,7 +199,7 @@ def get_delay_status():
             elif age_min > 30:
                 level = 'major'
             elif age_min > 15:
-                level = 'warning'
+                level = 'minor'
             else:
                 level = 'ok'
             delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
@@ -435,7 +435,7 @@ def main():
 
         delay_list = get_delay_status()
         d_ok      = len([d for d in delay_list if d['level'] == 'ok'])
-        d_warning = len([d for d in delay_list if d['level'] == 'warning'])
+        d_minor   = len([d for d in delay_list if d['level'] == 'minor'])
         d_major   = len([d for d in delay_list if d['level'] == 'major'])
         d_crit    = len([d for d in delay_list if d['level'] == 'critical'])
 
@@ -443,7 +443,7 @@ def main():
         with dc1:
             st.metric(label="🟢 Fresh (≤15m)", value=d_ok)
         with dc2:
-            st.metric(label="🟡 Warning (>15m)", value=d_warning)
+            st.metric(label="🟡 Minor (>15m)", value=d_minor)
         with dc3:
             st.metric(label="🟠 Major (>30m)", value=d_major)
         with dc4:
@@ -453,7 +453,7 @@ def main():
         if delayed:
             contacts = load_contacts()
             with st.expander(f"⏱️ {len(delayed)} parcuri cu delay", expanded=(d_crit > 0)):
-                emoji_delay = {'warning': '🟡', 'major': '🟠', 'critical': '🔴'}
+                emoji_delay = {'minor': '🟡', 'major': '🟠', 'critical': '🔴'}
                 for d in delayed:
                     e = emoji_delay.get(d['level'], '⏱️')
                     st.markdown(f"{e} **{d['name']}** — {d['age_min']} min")
@@ -500,14 +500,14 @@ def main():
         with pie_col2:
             st.markdown("**⏱️ Data Freshness**")
             d_ok2    = len([d for d in delay_list if d['level'] == 'ok'])
-            d_warning2 = len([d for d in delay_list if d['level'] == 'warning'])
+            d_minor2 = len([d for d in delay_list if d['level'] == 'minor'])
             d_major2 = len([d for d in delay_list if d['level'] == 'major'])
             d_crit2  = len([d for d in delay_list if d['level'] == 'critical'])
             dl, dv, dc = [], [], []
             if d_ok2 > 0:
                 dl.append(f"Fresh ({d_ok2})"); dv.append(d_ok2); dc.append("#00B050")
             if d_minor2 > 0:
-                dl.append(f"Warning ({d_warning2})"); dv.append(d_warning2); dc.append("#FFFF00")
+                dl.append(f"Minor ({d_minor2})"); dv.append(d_minor2); dc.append("#FFFF00")
             if d_major2 > 0:
                 dl.append(f"Major ({d_major2})"); dv.append(d_major2); dc.append("#FFC000")
             if d_crit2 > 0:
@@ -522,61 +522,34 @@ def main():
 
 
         # ====================================================================
-        # PROBLEMS LIST - combined production + delay
+        # PROBLEMS LIST
         # ====================================================================
 
-        # Build delay issues list for combined view
-        delay_issues = {
-            'critical': [d for d in delay_list if d['level'] == 'critical'],
-            'major':    [d for d in delay_list if d['level'] == 'major'],
-            'warning':  [d for d in delay_list if d['level'] == 'warning'],
-        }
-        total_delay_issues = sum(len(v) for v in delay_issues.values())
-        total_all_issues = total_problems + total_delay_issues
-
-        if total_all_issues > 0:
+        if total_problems > 0:
             st.markdown("---")
-            st.markdown(f"### ⚠️ Plants with Issues ({total_all_issues})")
+            st.markdown(f"### ⚠️ Plants with Issues ({total_problems})")
             contacts = load_contacts()
-
-            # CRITICAL - production first, then delay
-            crit_prod = critical_plants
-            crit_delay = delay_issues['critical']
-            if crit_prod or crit_delay:
-                st.markdown("#### 🔴 Critical")
-                for p in crit_prod:
-                    st.error(f"**{p['name']}** — {p['status']}")
+            if critical_plants:
+                st.markdown("#### 🔴 Critical Issues")
+                for p in critical_plants:
+                    st.error(f"**{p['name']}**")
+                    st.markdown(f"> {p['status']}")
                     render_contact_info(p['name'], contacts)
-                for d in crit_delay:
-                    st.error(f"**{d['name']}** — date cu {d['age_min']} min întârziere")
-                    render_contact_info(d['name'], contacts)
-
-            # MAJOR
-            maj_prod = major_plants
-            maj_delay = delay_issues['major']
-            if maj_prod or maj_delay:
-                st.markdown("#### 🟠 Major")
-                for p in maj_prod:
-                    st.warning(f"**{p['name']}** — {p['status']}")
+            if major_plants:
+                st.markdown("#### 🟠 Major Issues")
+                for p in major_plants:
+                    st.warning(f"**{p['name']}**")
+                    st.markdown(f"> {p['status']}")
                     render_contact_info(p['name'], contacts)
-                for d in maj_delay:
-                    st.warning(f"**{d['name']}** — date cu {d['age_min']} min întârziere")
-                    render_contact_info(d['name'], contacts)
-
-            # WARNING
-            warn_prod = warning_plants
-            warn_delay = delay_issues['warning']
-            if warn_prod or warn_delay:
-                st.markdown("#### 🔵 Warning")
-                for p in warn_prod:
-                    st.info(f"**{p['name']}** — {p['status']}")
+            if warning_plants:
+                st.markdown("#### 🔵 Warnings")
+                for p in warning_plants:
+                    st.info(f"**{p['name']}**")
+                    st.markdown(f"> {p['status']}")
                     render_contact_info(p['name'], contacts)
-                for d in warn_delay:
-                    st.info(f"**{d['name']}** — date cu {d['age_min']} min întârziere")
-                    render_contact_info(d['name'], contacts)
 
         else:
-            st.success("✅ All plants operating normally!")
+            st.success("✅ All plants operating normally (production)!")
 
         # ====================================================================
         # ALL PLANTS EXPANDABLE
