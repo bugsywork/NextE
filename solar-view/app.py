@@ -1239,7 +1239,7 @@ def fetch_forecast(uuid, date_from, date_to):
         # data_format=split returneaza {'index': [...], 'columns': [...], 'data': [...]}
         if 'index' in data and 'columns' in data and 'data' in data:
             df = pd.DataFrame(data['data'], columns=data['columns'], index=data['index'])
-            df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+            df.index = pd.to_datetime(df.index, utc=True, infer_datetime_format=True)
             df.index = df.index.tz_convert('Europe/Bucharest').tz_localize(None)
             df = df.reset_index().rename(columns={'index': 'ts', 'pac': 'forecast_kw'})
             if 'forecast_kw' not in df.columns and 'pac' in df.columns:
