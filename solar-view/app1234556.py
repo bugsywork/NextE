@@ -506,7 +506,7 @@ def main():
             dl, dv, dc = [], [], []
             if d_ok2 > 0:
                 dl.append(f"Fresh ({d_ok2})"); dv.append(d_ok2); dc.append("#00B050")
-            if d_warning2 > 0:
+            if d_minor2 > 0:
                 dl.append(f"Warning ({d_warning2})"); dv.append(d_warning2); dc.append("#FFFF00")
             if d_major2 > 0:
                 dl.append(f"Major ({d_major2})"); dv.append(d_major2); dc.append("#FFC000")
