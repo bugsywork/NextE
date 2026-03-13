@@ -731,7 +731,7 @@ def main():
                 plants_list = cmd.get('plants', [])
                 n_plants = len(plants_list) if isinstance(plants_list, list) else '?'
                 icon = "🔴" if action == "CURTAIL" else "🟢"
-                status_badge = "✅" if status in ("completed", "done") else ("⚠️" if status == "partial" else ("⏳" if status == "pending" else ("🔄" if status == "running" else "❌")))
+                status_badge = "✅" if status == "completed" else ("⏳" if status == "pending" else "❌")
                 with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale"):
                     results = cmd.get('result') or cmd.get('results')
                     # Normalizează: poate fi list sau dict sau JSON string
