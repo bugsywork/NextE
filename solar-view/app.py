@@ -601,7 +601,7 @@ def main():
             "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
             "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
             "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
-            "RES_ENERGY_PVPP", "Luxus_Energy_PVPP"
+            "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
         ]
 
         # ---- Helper functions ----
