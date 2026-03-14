@@ -340,7 +340,7 @@ def main():
 
     st.title("🌞 Solar Plants Dashboard")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🌞 Monitoring", "⚡ Curtailment", "📅 Schedule", "🇷🇴 SEN & Piață", "📧 Notificări Oprire", "📈 Forecast vs Actuals"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🌞 Monitoring", "⚡ Curtailment", "🇷🇴 SEN & Piață", "📧 Notificări Oprire", "📈 Forecast vs Actuals"])
 
     # ============================
     # TAB 1: MONITORING (existing)
@@ -784,228 +784,10 @@ def main():
         else:
             st.caption("Nicio comandă în baza de date.")
 
-
     # ============================
-    # TAB 3: SCHEDULE
+    # TAB 3: SEN & PIATA
     # ============================
     with tab3:
-        st.markdown("### 📅 Commander — Schedule Opriri/Porniri")
-
-        from supabase import create_client as _create_client
-        import json as _json
-        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-        from zoneinfo import ZoneInfo
-
-        _sb3 = _create_client(SUPABASE_URL, SUPABASE_KEY)
-        _tz_ro = ZoneInfo("Europe/Bucharest")
-
-        ALL_PLANTS_SCHED = [
-            "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-            "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
-            "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
-            "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
-            "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
-        ]
-
-        # ---- Helpers ----
-        def _load_schedule():
-            try:
-                r = _sb3.table("curtail_schedule") \
-                    .select("*") \
-                    .order("scheduled_start", desc=False) \
-                    .execute()
-                return r.data or []
-            except Exception as e:
-                st.error(f"Eroare incarcare schedule: {e}")
-                return []
-
-        def _status_badge(status):
-            badges = {
-                "scheduled":  ("🔵", "#1a2a3a", "#3498DB"),
-                "active":     ("🟠", "#3a2a0a", "#F5A623"),
-                "completed":  ("✅", "#0a2a1a", "#2ECC71"),
-                "cancelled":  ("❌", "#2a1a1a", "#888"),
-                "failed":     ("🔴", "#3a0a0a", "#E74C3C"),
-            }
-            icon, bg, color = badges.get(status, ("⚪", "#2a2a2a", "#aaa"))
-            return f'<span style="background:{bg};color:{color};border:0.5px solid {color}44;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500">{icon} {status}</span>'
-
-        # ---- Adauga programare ----
-        with st.expander("➕ Adaugă programare nouă", expanded=False):
-            col1, col2 = st.columns(2)
-            with col1:
-                sel_plants = st.multiselect("Centrale", ALL_PLANTS_SCHED, key="sched_plants")
-                sel_kw = st.number_input("Setpoint kW (0 = oprire completă)", min_value=0.0, value=0.0, step=100.0, key="sched_kw")
-                sel_notes = st.text_input("Note", key="sched_notes")
-            with col2:
-                import datetime as _datetime_mod
-                today = _datetime_mod.date.today()
-                sel_date = st.date_input("Data", value=today, key="sched_date")
-                col2a, col2b = st.columns(2)
-                with col2a:
-                    sel_start = st.time_input("Ora start", value=_datetime_mod.time(10, 0), key="sched_start")
-                with col2b:
-                    sel_stop = st.time_input("Ora stop", value=_datetime_mod.time(12, 0), key="sched_stop")
-                sel_notify = st.checkbox("Notifică client", value=True, key="sched_notify")
-
-            if st.button("💾 Salvează programare", type="primary", key="sched_save"):
-                if not sel_plants:
-                    st.error("Selectează cel puțin o centrală!")
-                else:
-                    _start_dt = _dt.combine(sel_date, sel_start, tzinfo=_tz_ro).astimezone(_tz.utc)
-                    _stop_dt  = _dt.combine(sel_date, sel_stop,  tzinfo=_tz_ro).astimezone(_tz.utc)
-                    if _stop_dt <= _start_dt:
-                        st.error("Ora stop trebuie să fie după ora start!")
-                    else:
-                        try:
-                            _sb3.table("curtail_schedule").insert({
-                                "plants":           sel_plants,
-                                "plant_name":       ", ".join(sel_plants),
-                                "scheduled_start":  _start_dt.isoformat(),
-                                "scheduled_stop":   _stop_dt.isoformat(),
-                                "kw":               sel_kw,
-                                "notes":            sel_notes or None,
-                                "notify_client":    sel_notify,
-                                "created_by":       "admin",
-                                "status":           "scheduled",
-                            }).execute()
-                            st.success(f"✅ Programare salvată: {', '.join(sel_plants)} | {sel_start}–{sel_stop}")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Eroare: {e}")
-
-        st.divider()
-
-        # ---- Timeline programari ----
-        jobs = _load_schedule()
-        now_ro = _dt.now(_tz_ro)
-
-        # Filtre
-        col_f1, col_f2 = st.columns([2, 1])
-        with col_f1:
-            filter_status = st.multiselect(
-                "Filtrare status",
-                ["scheduled", "active", "completed", "cancelled", "failed"],
-                default=["scheduled", "active"],
-                key="sched_filter"
-            )
-        with col_f2:
-            filter_days = st.selectbox("Perioadă", ["Azi", "7 zile", "30 zile", "Toate"], key="sched_days")
-
-        # Aplica filtre
-        filtered = []
-        for j in jobs:
-            if filter_status and j.get("status") not in filter_status:
-                continue
-            try:
-                j_start = _dt.fromisoformat(j["scheduled_start"].replace("Z", "+00:00")).astimezone(_tz_ro)
-                if filter_days == "Azi" and j_start.date() != now_ro.date():
-                    continue
-                elif filter_days == "7 zile" and (j_start - now_ro).days > 7:
-                    continue
-                elif filter_days == "30 zile" and (j_start - now_ro).days > 30:
-                    continue
-            except Exception:
-                pass
-            filtered.append(j)
-
-        if not filtered:
-            st.info("Nicio programare găsită pentru filtrele selectate.")
-        else:
-            st.markdown(f"**{len(filtered)} programări**")
-            for j in filtered:
-                try:
-                    j_start = _dt.fromisoformat(j["scheduled_start"].replace("Z", "+00:00")).astimezone(_tz_ro)
-                    j_stop  = _dt.fromisoformat(j["scheduled_stop"].replace("Z", "+00:00")).astimezone(_tz_ro)
-                except Exception:
-                    j_start = j_stop = None
-
-                plants_j = j.get("plants") or [j.get("plant_name", "?")]
-                if isinstance(plants_j, str):
-                    try:
-                        plants_j = _json.loads(plants_j)
-                    except Exception:
-                        plants_j = [plants_j]
-
-                kw_j = j.get("kw", 0)
-                action_label = f"0 kW (oprire completă)" if kw_j == 0 else f"{kw_j:.0f} kW"
-
-                # Time remaining
-                time_info = ""
-                if j_start and j.get("status") == "scheduled":
-                    diff = j_start - now_ro
-                    if diff.total_seconds() > 0:
-                        mins = int(diff.total_seconds() / 60)
-                        if mins < 60:
-                            time_info = f"⏰ în {mins} min"
-                        else:
-                            hrs = mins // 60
-                            time_info = f"⏰ în {hrs}h {mins%60}min"
-                    else:
-                        time_info = "⚠️ întârziat"
-                elif j_start and j.get("status") == "active":
-                    diff = j_stop - now_ro if j_stop else None
-                    if diff and diff.total_seconds() > 0:
-                        mins = int(diff.total_seconds() / 60)
-                        time_info = f"🔴 activ · stop în {mins} min"
-                    else:
-                        time_info = "🔴 activ"
-
-                start_str = j_start.strftime("%d %b · %H:%M") if j_start else "?"
-                stop_str  = j_stop.strftime("%H:%M") if j_stop else "?"
-
-                with st.expander(
-                    f"{'🔴' if kw_j == 0 else '🟡'} {', '.join(plants_j[:2])}{'...' if len(plants_j) > 2 else ''} | {start_str} → {stop_str} | {j.get('status','?')} {time_info}",
-                    expanded=j.get("status") == "active"
-                ):
-                    c1, c2, c3 = st.columns(3)
-                    with c1:
-                        st.markdown(f"**Centrale** ({len(plants_j)})")
-                        for p in plants_j:
-                            st.caption(f"• {p}")
-                    with c2:
-                        st.markdown("**Detalii**")
-                        st.caption(f"Start: {start_str}")
-                        st.caption(f"Stop:  {stop_str}")
-                        st.caption(f"Setpoint: {action_label}")
-                        if j.get("notes"):
-                            st.caption(f"Note: {j['notes']}")
-                    with c3:
-                        st.markdown("**Acțiuni**")
-                        st.markdown(_status_badge(j.get("status", "?")), unsafe_allow_html=True)
-                        if j.get("status") in ("scheduled", "active"):
-                            if st.button("❌ Anulează", key=f"cancel_{j['id']}"):
-                                try:
-                                    _sb3.table("curtail_schedule").update({"status": "cancelled"}).eq("id", j["id"]).execute()
-                                    st.success("Anulat!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Eroare: {e}")
-                        if j.get("status") == "scheduled":
-                            if st.button("▶ Execută acum", key=f"exec_{j['id']}"):
-                                try:
-                                    plants_exec = j.get("plants") or [j.get("plant_name")]
-                                    if isinstance(plants_exec, str):
-                                        plants_exec = _json.loads(plants_exec)
-                                    _sb3.table("curtail_commands").insert({
-                                        "action": j.get("action_start", "curtail"),
-                                        "plants": plants_exec,
-                                        "kw":     float(j.get("kw", 0)),
-                                        "status": "pending",
-                                    }).execute()
-                                    _sb3.table("curtail_schedule").update({
-                                        "status": "active",
-                                        "actual_start": _dt.now(_tz.utc).isoformat(),
-                                    }).eq("id", j["id"]).execute()
-                                    st.success("✅ Comanda trimisă!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Eroare: {e}")
-
-    # ============================
-    # TAB 4: SEN & PIATA
-    # ============================
-    with tab4:
         sen_latest, sen_error, sen_rows = get_sen_realtime()
 
         if sen_error:
@@ -1262,9 +1044,9 @@ def main():
 
 
     # ============================
-    # TAB 5: NOTIFICARI OPRIRE
+    # TAB 4: NOTIFICARI OPRIRE
     # ============================
-    with tab5:
+    with tab4:
         st.markdown("### 📧 Trimitere Notificări Oprire")
 
         TEMPLATES = {
@@ -1409,7 +1191,7 @@ District 5, 050881, Bucharest, Romania"""
             except Exception as e:
                 st.error(f"❌ Eroare trimitere email: {e}")
 
-    render_forecast_tab(tab6)
+    render_forecast_tab(tab5)
 
 
 # ============================================================================
