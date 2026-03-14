@@ -791,11 +791,12 @@ def main():
     with tab3:
         st.markdown("### 📅 Commander — Schedule Opriri/Porniri")
 
+        from supabase import create_client as _create_client
         import json as _json
-        import datetime as _datetime_mod2
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        from zoneinfo import ZoneInfo
 
-        _sb3 = create_client(SUPABASE_URL, SUPABASE_KEY)
+        _sb3 = _create_client(SUPABASE_URL, SUPABASE_KEY)
         _tz_ro = ZoneInfo("Europe/Bucharest")
 
         ALL_PLANTS_SCHED = [
@@ -837,13 +838,14 @@ def main():
                 sel_kw = st.number_input("Setpoint kW (0 = oprire completă)", min_value=0.0, value=0.0, step=100.0, key="sched_kw")
                 sel_notes = st.text_input("Note", key="sched_notes")
             with col2:
-                today = _datetime_mod2.date.today()
+                import datetime as _datetime_mod
+                today = _datetime_mod.date.today()
                 sel_date = st.date_input("Data", value=today, key="sched_date")
                 col2a, col2b = st.columns(2)
                 with col2a:
-                    sel_start = st.time_input("Ora start", value=_datetime_mod2.time(10, 0), key="sched_start")
+                    sel_start = st.time_input("Ora start", value=_datetime_mod.time(10, 0), key="sched_start")
                 with col2b:
-                    sel_stop = st.time_input("Ora stop", value=_datetime_mod2.time(12, 0), key="sched_stop")
+                    sel_stop = st.time_input("Ora stop", value=_datetime_mod.time(12, 0), key="sched_stop")
                 sel_notify = st.checkbox("Notifică client", value=True, key="sched_notify")
 
             if st.button("💾 Salvează programare", type="primary", key="sched_save"):
