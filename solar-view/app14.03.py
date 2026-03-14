@@ -732,22 +732,7 @@ def main():
                 n_plants = len(plants_list) if isinstance(plants_list, list) else '?'
                 icon = "🔴" if action == "CURTAIL" else "🟢"
                 status_badge = "✅" if status in ("completed", "done") else ("⚠️" if status == "partial" else ("⏳" if status == "pending" else ("🔄" if status == "running" else "❌")))
-                # Calculeaza durata comanda
-                _created = cmd.get('created_at', '')
-                _executed = cmd.get('executed_at', '')
-                _duration_str = ""
-                if _created and _executed:
-                    try:
-                        from datetime import datetime as _dt
-                        _t1 = _dt.fromisoformat(_created.replace('Z', '+00:00'))
-                        _t2 = _dt.fromisoformat(_executed.replace('Z', '+00:00'))
-                        _dur = int((_t2 - _t1).total_seconds())
-                        _min, _sec = divmod(_dur, 60)
-                        _duration_str = f" | ⏱ {_min}m {_sec}s" if _min else f" | ⏱ {_sec}s"
-                    except Exception:
-                        pass
-
-                with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale{_duration_str}"):
+                with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale"):
                     results = cmd.get('result') or cmd.get('results')
                     # Normalizează: poate fi list sau dict sau JSON string
                     if isinstance(results, str):
@@ -758,13 +743,10 @@ def main():
                             results = None
 
                     if isinstance(results, list) and results:
-                        ok_plants    = [r for r in results if r.get('success')]
-                        skip_plants  = [r for r in results if r.get('status') == 'skipped']
-                        fail_plants  = [r for r in results if not r.get('success') and r.get('status') != 'skipped']
+                        ok_plants   = [r for r in results if r.get('success')]
+                        fail_plants = [r for r in results if not r.get('success')]
                         if ok_plants:
                             st.success(f"✅ Reușite ({len(ok_plants)}): " + ", ".join(r['plant'] for r in ok_plants))
-                        if skip_plants:
-                            st.warning(f"⏭️ Sărite ({len(skip_plants)}): " + ", ".join(r['plant'] for r in skip_plants))
                         if fail_plants:
                             st.error(f"❌ Eșuate ({len(fail_plants)}):")
                             for r in fail_plants:
