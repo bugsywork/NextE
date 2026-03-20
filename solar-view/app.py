@@ -913,13 +913,16 @@ hr { border-color: #1e2330 !important; }
             else:
                 st.success("✅ Toți listenerii activi — sistemul e operațional")
 
-            # ── B: Comenzi pending/running > 2 min → warning ─────────────────
+            # ── B: Comenzi pending/running > 2 min dar < 2h → warning ──────────
             def get_stuck_commands():
                 try:
                     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    # Doar comenzile din ultimele 2 ore — cele mai vechi sunt istoric mort
+                    since = (datetime.now(ZoneInfo("UTC")) - timedelta(hours=2)).isoformat()
                     result = supabase.table("curtail_commands") \
                         .select("id,action,status,created_at,plants") \
                         .in_("status", ["pending", "running"]) \
+                        .gte("created_at", since) \
                         .order("created_at", desc=False) \
                         .execute()
                     stuck = []
