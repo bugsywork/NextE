@@ -860,7 +860,10 @@ hr { border-color: #1e2330 !important; }
             st.warning("🔒 Acces restricționat")
             pwd = st.text_input("Parolă:", type="password", key="curtail_pwd")
             if st.button("Autentificare", key="curtail_login"):
-                expected = st.secrets.get("curtail_password", "")
+                try:
+                    expected = st.secrets["curtail_password"]
+                except Exception:
+                    expected = ""
                 if not expected:
                     st.error("❌ Parola nu este configurată în secrets!")
                 elif pwd and pwd == expected:
@@ -1694,177 +1697,185 @@ hr { border-color: #1e2330 !important; }
     # TAB 5: NOTIFICARI OPRIRE
     # ============================
     with tab5:
-        st.markdown("### 📧 Notificări Oprire")
+        st.markdown("### 📧 Trimitere Notificări Oprire")
 
-        import requests as _req
+        TEMPLATES = {
+            "1A — Solicitare RO (alivecapital style)": {
+                "subject": "{cef} - Solicitarea de limitare la autoconsum - {data}",
+                "body": """Buna ziua,
 
-        @st.cache_data(ttl=300)
-        def load_email_templates():
+Va rugam ca maine, {data}, sa ne ajutati cu implementare limitare de putere la autoconsum (injectie 0), intre orele {start} - {end}. Motivul este lipsa contract de vanzare PZU pe intervalele cu preturi 0 si negative.
+
+Va rugam sa confirmati primirea acestui email.
+
+Va multumesc anticipat."""
+            },
+            "1B — Solicitare RO (ivygrid style)": {
+                "subject": "{cef} - Solicitare consemn putere 0 injectie - {data}",
+                "body": """Buna ziua,
+
+Va rugam ca maine, {data}, sa ne ajutati cu implementare consemn de putere injectie 0, intre orele {start} - {end} EET. Motivul este lipsa contract de vanzare PZU pe intervalele cu preturi 0 si negative.
+
+Va rugam sa confirmati primirea acestui email.
+
+Multumim anticipat,
+Remus
+nextE"""
+            },
+            "2 — Notificare RO (noi inchidem)": {
+                "subject": "{cef} - Notificare limitare la autoconsum - {data} {start}-{end} EET",
+                "body": """Buna ziua,
+
+Va informam ca maine, {data}, {cef} va fi limitata la autoconsum (injectie 0), intre orele {start} - {end}. Motivul este lipsa contract de vanzare PZU pe intervalele cu preturi 0 si negative.
+
+Va rugam sa confirmati primirea acestui email.
+
+Va multumesc anticipat."""
+            },
+            "3 — Solicitare EN cu tabel (Photon style)": {
+                "subject": "Active power set to 0 - {data}",
+                "body": """Dear Team,
+
+Please help us with active power set to 0 at the PVP below due to negative prices from {start} to {end} tomorrow ({data}). We kindly ask a confirmation once this request is acknowledged.
+
+Depending on the market conditions tomorrow, we will notify you tomorrow morning as well if there will be any changes.
+
+PvPP: {cef}
+Curtailment Start: {start}
+Curtailment Stop: {end}
+
+Please confirm receipt of this email.
+
+Best Regards,
+Remus
+nextE"""
+            },
+            "4 — Solicitare informala RO (ADD Solar style)": {
+                "subject": "Oprire Parc {data} - {cef}",
+                "body": """Salut,
+
+Te rog sa ne ajuti cu oprirea parcului {cef} pentru maine, {data}, intre orele {start} - {end}. Motivul acestei opriri programate este legat de curba de preturi din DAM care maine este 0 si usor negativa in acest interval iar riscul de a produce este foarte mare din cauza costurilor cu dezechilibrele.
+
+Te rog sa confirmi primirea acestui email.
+
+Multumesc,
+Remus"""
+            },
+        }
+
+        SIGNATURE = """
+
+Best regards / Mit freundlichen Grüßen / Cu stima,
+Remus Colesniuc
+Energy Operations
+
+remus.colesniuc@mynexte.com
+RO: +40 799955098
+
+www.mynexte.com
+
+nextE Holding AG
+Kreuzbuchweg 2, Meggen, 6045, Luzern, Switzerland
+
+nextE Renewable SRL
+AFI Tech Park, 29A Tudor Vladimirescu Boulevard, 4th floor
+District 5, 050881, Bucharest, Romania"""
+
+        col_form, col_preview = st.columns([1, 1])
+
+        with col_form:
+            template_key = st.selectbox("Template", list(TEMPLATES.keys()))
+            cef_name     = st.text_input("Nume CEF", placeholder="ex: CEF Vrancart")
+            date_val     = st.date_input("Data oprire (ziua de maine)")
+            col_s, col_e = st.columns(2)
+            with col_s:
+                start_time = st.time_input("Ora start", value=None)
+            with col_e:
+                end_time   = st.time_input("Ora stop", value=None)
+            to_email     = st.text_input("To", value="daniel.husaru@mynexte.com")
+            cc_email     = st.text_input("CC", value="remus.colesniuc@mynexte.com")
+
+        tpl = TEMPLATES[template_key]
+        date_str  = date_val.strftime("%d.%m.%Y") if date_val else ""
+        start_str = start_time.strftime("%H:%M") if start_time else ""
+        end_str   = end_time.strftime("%H:%M") if end_time else ""
+
+        subject_preview = tpl["subject"].format(cef=cef_name, data=date_str, start=start_str, end=end_str)
+        body_preview    = tpl["body"].format(cef=cef_name, data=date_str, start=start_str, end=end_str) + SIGNATURE
+
+        with col_preview:
+            st.markdown("**Preview:**")
+            st.text(f"To: {to_email}")
+            st.text(f"CC: {cc_email}")
+            st.text(f"Subject: {subject_preview}")
+            st.markdown("---")
+            st.text(body_preview)
+
+        st.markdown("---")
+        if st.button("📤 Trimite Email", type="primary"):
             try:
-                sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-                result = sb.table("email_templates") \
-                    .select("*") \
-                    .eq("is_active", True) \
-                    .order("sort_order") \
-                    .execute()
-                templates = {}
-                signature = ""
-                for row in (result.data or []):
-                    if row.get("type") == "signature":
-                        signature = row.get("body", "")
-                    else:
-                        templates[row["name"]] = {
-                            "subject": row.get("subject", ""),
-                            "body":    row.get("body", ""),
-                            "id":      row.get("id"),
-                        }
-                return templates, signature
-            except Exception as e:
-                st.error(f"Eroare incarcare template-uri: {e}")
-                return {}, ""
+                import requests as _req
 
-        @st.cache_data(ttl=300)
-        def load_plant_contacts():
-            try:
-                sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-                result = sb.table("plant_contacts").select("*").execute()
-                return {row["screen_name"]: row for row in (result.data or [])}
-            except Exception:
-                return {}
-
-        def send_graph_email(to_email, cc_email, subject, body):
-            try:
+                # Microsoft Graph API credentials din st.secrets
                 _client_id     = st.secrets["microsoft_graph"]["client_id"]
                 _tenant_id     = st.secrets["microsoft_graph"]["tenant_id"]
                 _client_secret = st.secrets["microsoft_graph"]["client_secret"]
                 _sender        = st.secrets["microsoft_graph"]["sender_email"]
-                _token_resp = _req.post(
-                    f"https://login.microsoftonline.com/{_tenant_id}/oauth2/v2.0/token",
-                    data={
-                        "grant_type":    "client_credentials",
-                        "client_id":     _client_id,
-                        "client_secret": _client_secret,
-                        "scope":         "https://graph.microsoft.com/.default",
-                    }, timeout=15
-                )
+
+                # 1. Obține token OAuth2
+                _token_url = f"https://login.microsoftonline.com/{_tenant_id}/oauth2/v2.0/token"
+                _token_resp = _req.post(_token_url, data={
+                    "grant_type":    "client_credentials",
+                    "client_id":     _client_id,
+                    "client_secret": _client_secret,
+                    "scope":         "https://graph.microsoft.com/.default",
+                }, timeout=15)
                 _token_resp.raise_for_status()
                 _access_token = _token_resp.json().get("access_token")
                 if not _access_token:
-                    return False, "Nu am putut obtine token Graph"
-                _to_list = [{"emailAddress": {"address": e.strip()}} for e in to_email.split(",") if e.strip()]
-                _cc_list = [{"emailAddress": {"address": e.strip()}} for e in cc_email.split(",") if e.strip()]
-                _send_resp = _req.post(
-                    f"https://graph.microsoft.com/v1.0/users/{_sender}/sendMail",
-                    headers={"Authorization": f"Bearer {_access_token}", "Content-Type": "application/json"},
-                    json={
-                        "message": {
-                            "subject": subject,
-                            "body": {"contentType": "Text", "content": body},
-                            "toRecipients": _to_list,
-                            "ccRecipients": _cc_list,
+                    st.error(f"❌ Nu am putut obține token Graph: {_token_resp.text[:200]}")
+                    st.stop()
+
+                # 2. Construiește payload email
+                _to_list  = [{"emailAddress": {"address": e.strip()}} for e in to_email.split(",") if e.strip()]
+                _cc_list  = [{"emailAddress": {"address": e.strip()}} for e in cc_email.split(",") if e.strip()]
+
+                _mail_payload = {
+                    "message": {
+                        "subject": subject_preview,
+                        "body": {
+                            "contentType": "Text",
+                            "content": body_preview,
                         },
-                        "saveToSentItems": "true",
-                    }, timeout=15,
+                        "toRecipients": _to_list,
+                        "ccRecipients": _cc_list,
+                    },
+                    "saveToSentItems": "true",
+                }
+
+                # 3. Trimite via Graph API
+                _send_url = f"https://graph.microsoft.com/v1.0/users/{_sender}/sendMail"
+                _send_resp = _req.post(
+                    _send_url,
+                    headers={
+                        "Authorization": f"Bearer {_access_token}",
+                        "Content-Type":  "application/json",
+                    },
+                    json=_mail_payload,
+                    timeout=15,
                 )
+
                 if _send_resp.status_code == 202:
-                    return True, "Email trimis cu succes!"
-                return False, f"Graph API ({_send_resp.status_code}): {_send_resp.text[:200]}"
+                    st.success(f"✅ Email trimis cu succes către {to_email}")
+                else:
+                    st.error(f"❌ Eroare Graph API ({_send_resp.status_code}): {_send_resp.text[:300]}")
+
+            except KeyError as e:
+                st.error(f"❌ Lipsește secretul: {e} — verifică st.secrets [microsoft_graph]")
             except Exception as e:
-                return False, str(e)
-
-        col_reload, _ = st.columns([1, 5])
-        with col_reload:
-            if st.button("Reincarca template-uri", key="reload_templates"):
-                st.cache_data.clear()
-                st.rerun()
-
-        TEMPLATES_DB, SIGNATURE = load_email_templates()
-        CONTACTS_DB = load_plant_contacts()
-
-        if not TEMPLATES_DB:
-            st.warning("Nu exista template-uri in Supabase.")
-        else:
-            col_form, col_preview = st.columns([1, 1])
-
-            with col_form:
-                template_key = st.selectbox("Template", list(TEMPLATES_DB.keys()), key="notif_template")
-                cef_options  = ["(manual)"] + sorted(CONTACTS_DB.keys())
-                cef_select   = st.selectbox("Centrala", cef_options, key="notif_cef")
-
-                if cef_select != "(manual)":
-                    contact    = CONTACTS_DB.get(cef_select, {})
-                    cef_name   = cef_select
-                    to_default = contact.get("to_email", "")
-                    cc_default = contact.get("cc_email", "")
-                else:
-                    cef_name   = ""
-                    to_default = ""
-                    cc_default = "octavian.ciuca@mynexte.com, daniel.husaru@mynexte.com, liviu.dragan@mynexte.com"
-
-                cef_name   = st.text_input("Nume CEF (in email)", value=cef_name, key="notif_cef_name")
-                date_val   = st.date_input("Data oprire", key="notif_date")
-                col_s, col_e = st.columns(2)
-                with col_s:
-                    start_time = st.time_input("Ora start", value=None, key="notif_start", step=300)
-                with col_e:
-                    end_time   = st.time_input("Ora stop",  value=None, key="notif_end",   step=300)
-                to_email   = st.text_input("To",  value=to_default,  key="notif_to")
-                cc_email   = st.text_input("CC",  value=cc_default,  key="notif_cc")
-
-            tpl       = TEMPLATES_DB[template_key]
-            date_str  = date_val.strftime("%d.%m.%Y") if date_val else ""
-            start_str = start_time.strftime("%H:%M") if start_time else ""
-            end_str   = end_time.strftime("%H:%M")   if end_time   else ""
-
-            try:
-                subject_preview = tpl["subject"].format(cef=cef_name, data=date_str, start=start_str, end=end_str)
-                body_preview    = tpl["body"].format(cef=cef_name, data=date_str, start=start_str, end=end_str)
-            except KeyError:
-                subject_preview = tpl["subject"]
-                body_preview    = tpl["body"]
-
-            full_body = body_preview + ("\n\n" + SIGNATURE if SIGNATURE else "")
-
-            with col_preview:
-                st.markdown("**Preview:**")
-                st.text(f"To:      {to_email}")
-                st.text(f"CC:      {cc_email}")
-                st.text(f"Subject: {subject_preview}")
-                st.markdown("---")
-                st.text(full_body)
-
-            with st.expander("Editeaza template selectat", expanded=False):
-                st.caption("Modificarile se salveaza in Supabase.")
-                edit_subject = st.text_input("Subject", value=tpl["subject"], key="edit_subject")
-                edit_body    = st.text_area("Body",    value=tpl["body"],    key="edit_body", height=300)
-                if st.button("Salveaza modificarile", key="save_template"):
-                    try:
-                        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-                        sb.table("email_templates").update({
-                            "subject":    edit_subject,
-                            "body":       edit_body,
-                            "updated_at": datetime.now(ZoneInfo("UTC")).isoformat(),
-                        }).eq("id", tpl["id"]).execute()
-                        st.success("Template salvat!")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Eroare salvare: {e}")
-
-            st.markdown("---")
-            if st.button("Trimite Email", type="primary", key="notif_send"):
-                if not to_email:
-                    st.error("Completeaza adresa To!")
-                else:
-                    with st.spinner("Se trimite..."):
-                        ok, msg = send_graph_email(to_email, cc_email, subject_preview, full_body)
-                    if ok:
-                        st.success(f"{msg}")
-                    else:
-                        st.error(f"Eroare: {msg}")
+                st.error(f"❌ Eroare trimitere email: {e}")
 
     render_forecast_tab(tab6)
-
 
 
 # ============================================================================
