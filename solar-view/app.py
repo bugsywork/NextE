@@ -333,6 +333,19 @@ def get_sen_history():
 # MAIN APP
 # ============================================================================
 
+# ============================================================================
+# PLANTS CONFIG — single source of truth, folosit in Tab 2 + Tab 3
+# ============================================================================
+
+ALL_PLANTS = [
+    "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
+    "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
+    "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
+    "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
+    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
+]
+
+
 def main():
 
     bucharest_tz = ZoneInfo("Europe/Bucharest")
@@ -847,7 +860,10 @@ hr { border-color: #1e2330 !important; }
             st.warning("🔒 Acces restricționat")
             pwd = st.text_input("Parolă:", type="password", key="curtail_pwd")
             if st.button("Autentificare", key="curtail_login"):
-                if pwd == st.secrets.get("curtail_password", ""):
+                expected = st.secrets.get("curtail_password", "")
+                if not expected:
+                    st.error("❌ Parola nu este configurată în secrets!")
+                elif pwd and pwd == expected:
                     st.session_state["curtail_authenticated"] = True
                     st.session_state["curtail_auth_time"] = datetime.now()
                     st.rerun()
@@ -855,15 +871,83 @@ hr { border-color: #1e2330 !important; }
                     st.error("❌ Parolă incorectă")
         else:
 
-            ALL_PLANTS = [
-                "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-                "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
-                "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
-                "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
-                "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
-            ]
+            # ── A: Heartbeat check — listeneri activi? ────────────────────────
+            def get_service_health():
+                try:
+                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    result = supabase.table("system_health").select("*").execute()
+                    return {row["service"]: row for row in (result.data or [])}
+                except Exception:
+                    return {}
 
-            # ---- Helper functions ----
+            health = get_service_health()
+            now_utc = datetime.now(ZoneInfo("UTC"))
+            STALE_SECONDS = 120  # 2 min = considerat mort
+
+            services = {
+                "curtail_listener":  "⚡ FusionSolar Listener",
+                "trecon_listener":   "🔌 Trecon Listener",
+                "schedule_executor": "📅 Schedule Executor",
+            }
+
+            dead_services = []
+            for svc_key, svc_label in services.items():
+                row = health.get(svc_key)
+                if not row:
+                    dead_services.append(f"{svc_label} — **niciodată pornit**")
+                    continue
+                try:
+                    last = datetime.fromisoformat(row["last_alive"].replace("Z", "+00:00"))
+                    age_s = (now_utc - last).total_seconds()
+                    if age_s > STALE_SECONDS:
+                        mins = int(age_s // 60)
+                        dead_services.append(f"{svc_label} — **mort de {mins} min**")
+                except Exception:
+                    dead_services.append(f"{svc_label} — **status necunoscut**")
+
+            if dead_services:
+                st.error(
+                    "🚨 **ATENȚIE — SERVICII INACTIVE! Comenzile NU vor fi executate!**\n\n" +
+                    "\n".join(f"• {s}" for s in dead_services)
+                )
+            else:
+                st.success("✅ Toți listenerii activi — sistemul e operațional")
+
+            # ── B: Comenzi pending/running > 2 min → warning ─────────────────
+            def get_stuck_commands():
+                try:
+                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    result = supabase.table("curtail_commands") \
+                        .select("id,action,status,created_at,plants") \
+                        .in_("status", ["pending", "running"]) \
+                        .order("created_at", desc=False) \
+                        .execute()
+                    stuck = []
+                    for cmd in (result.data or []):
+                        try:
+                            created = datetime.fromisoformat(
+                                cmd["created_at"].replace("Z", "+00:00")
+                            )
+                            age_s = (now_utc - created).total_seconds()
+                            if age_s > 120:
+                                stuck.append({**cmd, "age_min": round(age_s / 60, 1)})
+                        except Exception:
+                            pass
+                    return stuck
+                except Exception:
+                    return []
+
+            stuck_cmds = get_stuck_commands()
+            if stuck_cmds:
+                for sc in stuck_cmds:
+                    n = len(sc.get("plants") or [])
+                    st.warning(
+                        f"⚠️ **Comandă blocată!** `{sc['action'].upper()}` pe {n} centrale — "
+                        f"status `{sc['status']}` de **{sc['age_min']} min**. "
+                        f"Verifică dacă listenerul rulează!"
+                    )
+
+            st.markdown("---")
             @st.cache_data(ttl=15)
             def get_curtail_status():
                 try:
@@ -894,15 +978,36 @@ hr { border-color: #1e2330 !important; }
 
             def send_curtail_command(action: str, plants: list = None):
                 try:
+                    import uuid as _uuid
                     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    # H: idempotency — verifica daca exista deja o comanda identica pending/running
+                    # in ultimele 60 secunde (double-click protection)
+                    recent = supabase.table("curtail_commands") \
+                        .select("id,created_at") \
+                        .eq("action", action) \
+                        .in_("status", ["pending", "running"]) \
+                        .order("created_at", desc=True) \
+                        .limit(1) \
+                        .execute()
+                    if recent.data:
+                        try:
+                            last_ts = datetime.fromisoformat(
+                                recent.data[0]["created_at"].replace("Z", "+00:00")
+                            )
+                            age_s = (datetime.now(ZoneInfo("UTC")) - last_ts).total_seconds()
+                            if age_s < 60:
+                                return False, f"⚠️ Comandă {action.upper()} deja în curs (acum {int(age_s)}s). Așteaptă finalizarea."
+                        except Exception:
+                            pass
                     payload = {
-                        "action": action,
-                        "kw": 0.0 if action == "curtail" else 99999.0,
-                        "plants": plants if plants else ALL_PLANTS,
-                        "status": "pending",
-                        "created_at": datetime.now(ZoneInfo("Europe/Bucharest")).isoformat()
+                        "action":     action,
+                        "kw":         0.0 if action == "curtail" else 99999.0,
+                        "plants":     plants if plants else ALL_PLANTS,
+                        "status":     "pending",
+                        "created_at": datetime.now(ZoneInfo("Europe/Bucharest")).isoformat(),
+                        "command_uid": str(_uuid.uuid4()),  # H: dedup key
                     }
-                    result = supabase.table('curtail_commands').insert(payload).execute()
+                    result = supabase.table("curtail_commands").insert(payload).execute()
                     return True, "Comandă trimisă cu succes!"
                 except Exception as e:
                     return False, f"Eroare: {str(e)}"
@@ -1124,13 +1229,7 @@ hr { border-color: #1e2330 !important; }
         _sb3 = create_client(SUPABASE_URL, SUPABASE_KEY)
         _tz_ro = ZoneInfo("Europe/Bucharest")
 
-        ALL_PLANTS_SCHED = [
-            "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-            "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
-            "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
-            "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
-            "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
-        ]
+        ALL_PLANTS_SCHED = ALL_PLANTS  # D: single source of truth — definit in Tab 2
 
         # ---- Helpers ----
         def _load_schedule():
