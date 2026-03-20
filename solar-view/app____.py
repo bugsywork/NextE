@@ -1262,7 +1262,7 @@ hr { border-color: #1e2330 !important; }
             col1, col2 = st.columns(2)
             with col1:
                 sel_plants = st.multiselect("Centrale", ALL_PLANTS_SCHED, key="sched_plants")
-                sel_kw = st.number_input("Setpoint % (0 = oprire completă, 100 = fără limitare)", min_value=0.0, max_value=100.0, value=0.0, step=5.0, key="sched_kw")
+                sel_kw = st.number_input("Setpoint kW (0 = oprire completă)", min_value=0.0, value=0.0, step=100.0, key="sched_kw")
                 sel_notes = st.text_input("Note", key="sched_notes")
             with col2:
                 today = _datetime_mod2.date.today()
@@ -1354,7 +1354,7 @@ hr { border-color: #1e2330 !important; }
                         plants_j = [plants_j]
 
                 kw_j = j.get("kw", 0)
-                action_label = f"0% (oprire completă)" if kw_j == 0 else f"{kw_j:.0f}%"
+                action_label = f"0 kW (oprire completă)" if kw_j == 0 else f"{kw_j:.0f} kW"
 
                 # Time remaining
                 time_info = ""
