@@ -1280,11 +1280,8 @@ hr { border-color: #1e2330 !important; }
                 else:
                     _start_dt = _dt.combine(sel_date, sel_start, tzinfo=_tz_ro).astimezone(_tz.utc)
                     _stop_dt  = _dt.combine(sel_date, sel_stop,  tzinfo=_tz_ro).astimezone(_tz.utc)
-                    _now_utc  = _dt.now(_tz.utc)
-                    if _start_dt < _now_utc:
-                        st.error(f"❌ Ora start ({sel_start} EET) e în trecut! Selectează o oră viitoare.")
-                    elif _stop_dt <= _start_dt:
-                        st.error("❌ Ora stop trebuie să fie după ora start!")
+                    if _stop_dt <= _start_dt:
+                        st.error("Ora stop trebuie să fie după ora start!")
                     else:
                         try:
                             _sb3.table("curtail_schedule").insert({
@@ -1298,7 +1295,7 @@ hr { border-color: #1e2330 !important; }
                                 "created_by":       "admin",
                                 "status":           "scheduled",
                             }).execute()
-                            st.success(f"✅ Programare salvată: {', '.join(sel_plants)} | {sel_start}–{sel_stop} EET")
+                            st.success(f"✅ Programare salvată: {', '.join(sel_plants)} | {sel_start}–{sel_stop}")
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ Eroare: {e}")
