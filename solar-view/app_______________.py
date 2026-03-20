@@ -860,10 +860,7 @@ hr { border-color: #1e2330 !important; }
             st.warning("🔒 Acces restricționat")
             pwd = st.text_input("Parolă:", type="password", key="curtail_pwd")
             if st.button("Autentificare", key="curtail_login"):
-                try:
-                    expected = st.secrets["curtail_password"]
-                except Exception:
-                    expected = ""
+                expected = st.secrets.get("curtail_password", "")
                 if not expected:
                     st.error("❌ Parola nu este configurată în secrets!")
                 elif pwd and pwd == expected:
