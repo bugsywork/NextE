@@ -338,13 +338,6 @@ def main():
     bucharest_tz = ZoneInfo("Europe/Bucharest")
     bucharest_now = datetime.now(bucharest_tz)
 
-    # ── Session state defaults ─────────────────────────────────────────────────
-    for _key in ["confirm_curtail_all", "confirm_restore_all",
-                 "confirm_curtail_sel", "confirm_restore_sel",
-                 "curtail_in_progress"]:
-        if _key not in st.session_state:
-            st.session_state[_key] = False
-
     # ── Commander CSS ──────────────────────────────────────────────────────────
     st.markdown("""
 <style>
@@ -830,18 +823,9 @@ hr { border-color: #1e2330 !important; }
     with tab2:
         st.markdown("### ⚡ Curtailment Control")
 
-        # Password protection + session timeout 2h
+        # Password protection
         if "curtail_authenticated" not in st.session_state:
             st.session_state["curtail_authenticated"] = False
-            st.session_state["curtail_auth_time"] = None
-
-        # Verifică timeout 2h
-        if st.session_state["curtail_authenticated"]:
-            auth_time = st.session_state.get("curtail_auth_time")
-            if auth_time and (datetime.now() - auth_time).total_seconds() > 7200:
-                st.session_state["curtail_authenticated"] = False
-                st.session_state["curtail_auth_time"] = None
-                st.warning("⏱️ Sesiunea a expirat (2h). Re-autentificare necesară.")
 
         if not st.session_state["curtail_authenticated"]:
             st.warning("🔒 Acces restricționat")
@@ -849,266 +833,198 @@ hr { border-color: #1e2330 !important; }
             if st.button("Autentificare", key="curtail_login"):
                 if pwd == st.secrets.get("curtail_password", ""):
                     st.session_state["curtail_authenticated"] = True
-                    st.session_state["curtail_auth_time"] = datetime.now()
                     st.rerun()
                 else:
                     st.error("❌ Parolă incorectă")
-        else:
+            st.stop()
 
-            ALL_PLANTS = [
-                "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-                "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
-                "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
-                "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
-                "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
-            ]
+        ALL_PLANTS = [
+            "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
+            "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
+            "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
+            "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
+            "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
+        ]
 
-            # ---- Helper functions ----
-            @st.cache_data(ttl=15)
-            def get_curtail_status():
-                try:
-                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-                    result = supabase.table('curtail_commands') \
-                        .select('*') \
-                        .order('created_at', desc=True) \
-                        .limit(1) \
-                        .execute()
-                    if result.data:
-                        return result.data[0]
-                    return None
-                except Exception as e:
-                    return None
+        # ---- Helper functions ----
+        @st.cache_data(ttl=15)
+        def get_curtail_status():
+            try:
+                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                result = supabase.table('curtail_commands') \
+                    .select('*') \
+                    .order('created_at', desc=True) \
+                    .limit(1) \
+                    .execute()
+                if result.data:
+                    return result.data[0]
+                return None
+            except Exception as e:
+                return None
 
-            @st.cache_data(ttl=15)
-            def get_curtail_history():
-                try:
-                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-                    result = supabase.table('curtail_commands') \
-                        .select('*') \
-                        .order('created_at', desc=True) \
-                        .limit(10) \
-                        .execute()
-                    return result.data if result.data else []
-                except Exception as e:
-                    return []
+        @st.cache_data(ttl=15)
+        def get_curtail_history():
+            try:
+                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                result = supabase.table('curtail_commands') \
+                    .select('*') \
+                    .order('created_at', desc=True) \
+                    .limit(10) \
+                    .execute()
+                return result.data if result.data else []
+            except Exception as e:
+                return []
 
-            def send_curtail_command(action: str, plants: list = None):
-                try:
-                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-                    payload = {
-                        "action": action,
-                        "kw": 0.0 if action == "curtail" else 99999.0,
-                        "plants": plants if plants else ALL_PLANTS,
-                        "status": "pending",
-                        "created_at": datetime.now(ZoneInfo("Europe/Bucharest")).isoformat()
-                    }
-                    result = supabase.table('curtail_commands').insert(payload).execute()
-                    return True, "Comandă trimisă cu succes!"
-                except Exception as e:
-                    return False, f"Eroare: {str(e)}"
+        def send_curtail_command(action: str, plants: list = None):
+            try:
+                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                payload = {
+                    "action": action,
+                    "kw": 0.0 if action == "curtail" else 99999.0,
+                    "plants": plants if plants else ALL_PLANTS,
+                    "status": "pending",
+                    "created_at": datetime.now(ZoneInfo("Europe/Bucharest")).isoformat()
+                }
+                result = supabase.table('curtail_commands').insert(payload).execute()
+                return True, "Comandă trimisă cu succes!"
+            except Exception as e:
+                return False, f"Eroare: {str(e)}"
 
-            # ---- Current Status ----
-            last_cmd = get_curtail_status()
-            col_status, col_info = st.columns([1, 2])
-            with col_status:
-                if last_cmd:
-                    action = last_cmd.get('action', 'unknown').upper()
-                    status = last_cmd.get('status', 'unknown')
-                    ts = last_cmd.get('created_at', '')[:16].replace('T', ' ')
-                    if action == 'CURTAIL':
-                        st.error(f"🔴 **CURTAILED**")
-                    else:
-                        st.success(f"🟢 **RESTORED**")
-                    st.caption(f"Status: `{status}` | {ts}")
+        # ---- Current Status ----
+        last_cmd = get_curtail_status()
+        col_status, col_info = st.columns([1, 2])
+        with col_status:
+            if last_cmd:
+                action = last_cmd.get('action', 'unknown').upper()
+                status = last_cmd.get('status', 'unknown')
+                ts = last_cmd.get('created_at', '')[:16].replace('T', ' ')
+                if action == 'CURTAIL':
+                    st.error(f"🔴 **CURTAILED**")
                 else:
-                    st.info("ℹ️ Nicio comandă anterioară")
-
-            with col_info:
-                st.markdown("**Comandă rapidă — toate cele 17 centrale:**")
-                col_c, col_r = st.columns(2)
-                with col_c:
-                    if st.button("🔴 CURTAIL ALL", type="primary", use_container_width=True,
-                                 disabled=st.session_state.get("curtail_in_progress", False)):
-                        st.session_state["confirm_curtail_all"] = True
-                if st.session_state.get("confirm_curtail_all"):
-                    st.error("⚠️ **Confirmare necesară!** Scrie `CURTAIL` mai jos și apasă butonul:")
-                    confirm_input = st.text_input("", key="confirm_curtail_input", placeholder="CURTAIL")
-                    col_yes, col_no = st.columns(2)
-                    with col_yes:
-                        if st.button("✅ Confirm CURTAIL ALL", key="confirm_curtail_yes",
-                                     disabled=confirm_input != "CURTAIL",
-                                     use_container_width=True):
-                            st.session_state["curtail_in_progress"] = True
-                            st.session_state["confirm_curtail_all"] = False
-                            ok, msg = send_curtail_command("curtail", ALL_PLANTS)
-                            st.session_state["curtail_in_progress"] = False
-                            if ok:
-                                st.success(msg)
-                                st.cache_data.clear()
-                                st.rerun()
-                            else:
-                                st.error(msg)
-                    with col_no:
-                        if st.button("❌ Anulează", key="confirm_curtail_no", use_container_width=True):
-                            st.session_state["confirm_curtail_all"] = False
-                            st.rerun()
-
-                with col_r:
-                    if st.button("🟢 RESTORE ALL", use_container_width=True,
-                                 disabled=st.session_state.get("curtail_in_progress", False)):
-                        st.session_state["confirm_restore_all"] = True
-                if st.session_state.get("confirm_restore_all"):
-                    st.warning("⚠️ **Confirmare necesară!** Scrie `RESTORE` mai jos și apasă butonul:")
-                    confirm_restore_input = st.text_input("", key="confirm_restore_input", placeholder="RESTORE")
-                    col_yes2, col_no2 = st.columns(2)
-                    with col_yes2:
-                        if st.button("✅ Confirm RESTORE ALL", key="confirm_restore_yes",
-                                     disabled=confirm_restore_input != "RESTORE",
-                                     use_container_width=True):
-                            st.session_state["curtail_in_progress"] = True
-                            st.session_state["confirm_restore_all"] = False
-                            ok, msg = send_curtail_command("restore", ALL_PLANTS)
-                            st.session_state["curtail_in_progress"] = False
-                            if ok:
-                                st.success(msg)
-                                st.cache_data.clear()
-                                st.rerun()
-                            else:
-                                st.error(msg)
-                    with col_no2:
-                        if st.button("❌ Anulează", key="confirm_restore_no", use_container_width=True):
-                            st.session_state["confirm_restore_all"] = False
-                            st.rerun()
-
-            st.markdown("---")
-
-            # ---- Selective plant curtailment ----
-            with st.expander("🎯 Comandă selectivă — centrale individuale"):
-                select_all = st.checkbox("Toate centralele (17)", value=False)
-                if select_all:
-                    selected_plants = ALL_PLANTS
-                else:
-                    selected_plants = st.multiselect(
-                        "Selectați centralele:",
-                        options=ALL_PLANTS,
-                        default=[]
-                    )
-                if selected_plants:
-                    col_cs, col_rs = st.columns(2)
-                    with col_cs:
-                        if st.button(f"🔴 CURTAIL ({len(selected_plants)})", key="curtail_sel",
-                                     use_container_width=True,
-                                     disabled=st.session_state.get("curtail_in_progress", False)):
-                            st.session_state["confirm_curtail_sel"] = True
-                    with col_rs:
-                        if st.button(f"🟢 RESTORE ({len(selected_plants)})", key="restore_sel",
-                                     use_container_width=True,
-                                     disabled=st.session_state.get("curtail_in_progress", False)):
-                            st.session_state["confirm_restore_sel"] = True
-
-                    if st.session_state.get("confirm_curtail_sel"):
-                        st.error(f"⚠️ Confirmare CURTAIL pentru: **{', '.join(selected_plants[:3])}{'...' if len(selected_plants) > 3 else ''}**")
-                        col_yc, col_nc = st.columns(2)
-                        with col_yc:
-                            if st.button("✅ Da, curtail", key="confirm_curtail_sel_yes", use_container_width=True):
-                                st.session_state["curtail_in_progress"] = True
-                                st.session_state["confirm_curtail_sel"] = False
-                                ok, msg = send_curtail_command("curtail", selected_plants)
-                                st.session_state["curtail_in_progress"] = False
-                                if ok:
-                                    st.success(msg)
-                                    st.cache_data.clear()
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                        with col_nc:
-                            if st.button("❌ Anulează", key="confirm_curtail_sel_no", use_container_width=True):
-                                st.session_state["confirm_curtail_sel"] = False
-                                st.rerun()
-
-                    if st.session_state.get("confirm_restore_sel"):
-                        st.warning(f"⚠️ Confirmare RESTORE pentru: **{', '.join(selected_plants[:3])}{'...' if len(selected_plants) > 3 else ''}**")
-                        col_yr, col_nr = st.columns(2)
-                        with col_yr:
-                            if st.button("✅ Da, restore", key="confirm_restore_sel_yes", use_container_width=True):
-                                st.session_state["curtail_in_progress"] = True
-                                st.session_state["confirm_restore_sel"] = False
-                                ok, msg = send_curtail_command("restore", selected_plants)
-                                st.session_state["curtail_in_progress"] = False
-                                if ok:
-                                    st.success(msg)
-                                    st.cache_data.clear()
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                        with col_nr:
-                            if st.button("❌ Anulează", key="confirm_restore_sel_no", use_container_width=True):
-                                st.session_state["confirm_restore_sel"] = False
-                                st.rerun()
-
-            # ---- Command History ----
-            st.markdown("#### 📋 Istoric comenzi (ultimele 10)")
-            history = get_curtail_history()
-            if history:
-                for cmd in history:
-                    action = cmd.get('action', '?').upper()
-                    status = cmd.get('status', '?')
-                    ts = cmd.get('created_at', '')[:16].replace('T', ' ')
-                    plants_list = cmd.get('plants', [])
-                    n_plants = len(plants_list) if isinstance(plants_list, list) else '?'
-                    icon = "🔴" if action == "CURTAIL" else "🟢"
-                    status_badge = "✅" if status in ("completed", "done") else ("⚠️" if status == "partial" else ("⏳" if status == "pending" else ("🔄" if status == "running" else "❌")))
-                    # Calculeaza durata comanda
-                    _created = cmd.get('created_at', '')
-                    _executed = cmd.get('executed_at', '')
-                    _duration_str = ""
-                    if _created and _executed:
-                        try:
-                            from datetime import datetime as _dt
-                            _t1 = _dt.fromisoformat(_created.replace('Z', '+00:00'))
-                            _t2 = _dt.fromisoformat(_executed.replace('Z', '+00:00'))
-                            _dur = int((_t2 - _t1).total_seconds())
-                            _min, _sec = divmod(_dur, 60)
-                            _duration_str = f" | ⏱ {_min}m {_sec}s" if _min else f" | ⏱ {_sec}s"
-                        except Exception:
-                            pass
-
-                    with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale{_duration_str}"):
-                        results = cmd.get('result') or cmd.get('results')
-                        # Normalizează: poate fi list sau dict sau JSON string
-                        if isinstance(results, str):
-                            try:
-                                import json as _json
-                                results = _json.loads(results)
-                            except Exception:
-                                results = None
-
-                        if isinstance(results, list) and results:
-                            ok_plants    = [r for r in results if r.get('success')]
-                            skip_plants  = [r for r in results if r.get('status') == 'skipped']
-                            fail_plants  = [r for r in results if not r.get('success') and r.get('status') != 'skipped']
-                            if ok_plants:
-                                st.success(f"✅ Reușite ({len(ok_plants)}): " + ", ".join(r['plant'] for r in ok_plants))
-                            if skip_plants:
-                                st.warning(f"⏭️ Sărite ({len(skip_plants)}): " + ", ".join(r['plant'] for r in skip_plants))
-                            if fail_plants:
-                                st.error(f"❌ Eșuate ({len(fail_plants)}):")
-                                for r in fail_plants:
-                                    st.caption(f"  • **{r['plant']}** — {r.get('error', 'eroare necunoscută')}")
-                        elif isinstance(results, dict) and results:
-                            for plant, res in results.items():
-                                if not isinstance(res, dict):
-                                    st.caption(f"⚠️ **{plant}** — date incomplete")
-                                    continue
-                                ok_icon = "✅" if res.get('success') else "❌"
-                                err = res.get('error', '')
-                                st.caption(f"{ok_icon} **{plant}** {err}")
-                        else:
-                            # Nu avem rezultate încă (running/pending)
-                            if isinstance(plants_list, list) and plants_list:
-                                st.write(", ".join(plants_list))
+                    st.success(f"🟢 **RESTORED**")
+                st.caption(f"Status: `{status}` | {ts}")
             else:
-                st.caption("Nicio comandă în baza de date.")
+                st.info("ℹ️ Nicio comandă anterioară")
+
+        with col_info:
+            st.markdown("**Comandă rapidă — toate cele 17 centrale:**")
+            col_c, col_r = st.columns(2)
+            with col_c:
+                if st.button("🔴 CURTAIL ALL", type="primary", use_container_width=True):
+                    ok, msg = send_curtail_command("curtail", ALL_PLANTS)
+                    if ok:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            with col_r:
+                if st.button("🟢 RESTORE ALL", use_container_width=True):
+                    ok, msg = send_curtail_command("restore", ALL_PLANTS)
+                    if ok:
+                        st.success(msg)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        st.markdown("---")
+
+        # ---- Selective plant curtailment ----
+        with st.expander("🎯 Comandă selectivă — centrale individuale"):
+            select_all = st.checkbox("Toate centralele (17)", value=True)
+            if select_all:
+                selected_plants = ALL_PLANTS
+            else:
+                selected_plants = st.multiselect(
+                    "Selectați centralele:",
+                    options=ALL_PLANTS,
+                    default=[]
+                )
+            if selected_plants:
+                col_cs, col_rs = st.columns(2)
+                with col_cs:
+                    if st.button(f"🔴 CURTAIL ({len(selected_plants)})", key="curtail_sel", use_container_width=True):
+                        ok, msg = send_curtail_command("curtail", selected_plants)
+                        if ok:
+                            st.success(msg)
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                with col_rs:
+                    if st.button(f"🟢 RESTORE ({len(selected_plants)})", key="restore_sel", use_container_width=True):
+                        ok, msg = send_curtail_command("restore", selected_plants)
+                        if ok:
+                            st.success(msg)
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+        # ---- Command History ----
+        st.markdown("#### 📋 Istoric comenzi (ultimele 10)")
+        history = get_curtail_history()
+        if history:
+            for cmd in history:
+                action = cmd.get('action', '?').upper()
+                status = cmd.get('status', '?')
+                ts = cmd.get('created_at', '')[:16].replace('T', ' ')
+                plants_list = cmd.get('plants', [])
+                n_plants = len(plants_list) if isinstance(plants_list, list) else '?'
+                icon = "🔴" if action == "CURTAIL" else "🟢"
+                status_badge = "✅" if status in ("completed", "done") else ("⚠️" if status == "partial" else ("⏳" if status == "pending" else ("🔄" if status == "running" else "❌")))
+                # Calculeaza durata comanda
+                _created = cmd.get('created_at', '')
+                _executed = cmd.get('executed_at', '')
+                _duration_str = ""
+                if _created and _executed:
+                    try:
+                        from datetime import datetime as _dt
+                        _t1 = _dt.fromisoformat(_created.replace('Z', '+00:00'))
+                        _t2 = _dt.fromisoformat(_executed.replace('Z', '+00:00'))
+                        _dur = int((_t2 - _t1).total_seconds())
+                        _min, _sec = divmod(_dur, 60)
+                        _duration_str = f" | ⏱ {_min}m {_sec}s" if _min else f" | ⏱ {_sec}s"
+                    except Exception:
+                        pass
+
+                with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale{_duration_str}"):
+                    results = cmd.get('result') or cmd.get('results')
+                    # Normalizează: poate fi list sau dict sau JSON string
+                    if isinstance(results, str):
+                        try:
+                            import json as _json
+                            results = _json.loads(results)
+                        except Exception:
+                            results = None
+
+                    if isinstance(results, list) and results:
+                        ok_plants    = [r for r in results if r.get('success')]
+                        skip_plants  = [r for r in results if r.get('status') == 'skipped']
+                        fail_plants  = [r for r in results if not r.get('success') and r.get('status') != 'skipped']
+                        if ok_plants:
+                            st.success(f"✅ Reușite ({len(ok_plants)}): " + ", ".join(r['plant'] for r in ok_plants))
+                        if skip_plants:
+                            st.warning(f"⏭️ Sărite ({len(skip_plants)}): " + ", ".join(r['plant'] for r in skip_plants))
+                        if fail_plants:
+                            st.error(f"❌ Eșuate ({len(fail_plants)}):")
+                            for r in fail_plants:
+                                st.caption(f"  • **{r['plant']}** — {r.get('error', 'eroare necunoscută')}")
+                    elif isinstance(results, dict) and results:
+                        for plant, res in results.items():
+                            if not isinstance(res, dict):
+                                st.caption(f"⚠️ **{plant}** — date incomplete")
+                                continue
+                            ok_icon = "✅" if res.get('success') else "❌"
+                            err = res.get('error', '')
+                            st.caption(f"{ok_icon} **{plant}** {err}")
+                    else:
+                        # Nu avem rezultate încă (running/pending)
+                        if isinstance(plants_list, list) and plants_list:
+                            st.write(", ".join(plants_list))
+        else:
+            st.caption("Nicio comandă în baza de date.")
 
 
     # ============================
