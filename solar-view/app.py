@@ -1696,17 +1696,14 @@ hr { border-color: #1e2330 !important; }
     with tab5:
         st.markdown("### 📧 Notificări Oprire")
 
-        import requests as _req
+        import requests as _req_mail
 
         @st.cache_data(ttl=300)
         def load_email_templates():
             try:
                 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
                 result = sb.table("email_templates") \
-                    .select("*") \
-                    .eq("is_active", True) \
-                    .order("sort_order") \
-                    .execute()
+                    .select("*").eq("is_active", True).order("sort_order").execute()
                 templates = {}
                 signature = ""
                 for row in (result.data or []):
@@ -1738,14 +1735,11 @@ hr { border-color: #1e2330 !important; }
                 _tenant_id     = st.secrets["microsoft_graph"]["tenant_id"]
                 _client_secret = st.secrets["microsoft_graph"]["client_secret"]
                 _sender        = st.secrets["microsoft_graph"]["sender_email"]
-                _token_resp = _req.post(
+                _token_resp = _req_mail.post(
                     f"https://login.microsoftonline.com/{_tenant_id}/oauth2/v2.0/token",
-                    data={
-                        "grant_type":    "client_credentials",
-                        "client_id":     _client_id,
-                        "client_secret": _client_secret,
-                        "scope":         "https://graph.microsoft.com/.default",
-                    }, timeout=15
+                    data={"grant_type": "client_credentials", "client_id": _client_id,
+                          "client_secret": _client_secret, "scope": "https://graph.microsoft.com/.default"},
+                    timeout=15
                 )
                 _token_resp.raise_for_status()
                 _access_token = _token_resp.json().get("access_token")
@@ -1753,120 +1747,173 @@ hr { border-color: #1e2330 !important; }
                     return False, "Nu am putut obtine token Graph"
                 _to_list = [{"emailAddress": {"address": e.strip()}} for e in to_email.split(",") if e.strip()]
                 _cc_list = [{"emailAddress": {"address": e.strip()}} for e in cc_email.split(",") if e.strip()]
-                _send_resp = _req.post(
+                _send_resp = _req_mail.post(
                     f"https://graph.microsoft.com/v1.0/users/{_sender}/sendMail",
                     headers={"Authorization": f"Bearer {_access_token}", "Content-Type": "application/json"},
-                    json={
-                        "message": {
-                            "subject": subject,
-                            "body": {"contentType": "Text", "content": body},
-                            "toRecipients": _to_list,
-                            "ccRecipients": _cc_list,
-                        },
-                        "saveToSentItems": "true",
-                    }, timeout=15,
+                    json={"message": {"subject": subject,
+                                      "body": {"contentType": "Text", "content": body},
+                                      "toRecipients": _to_list, "ccRecipients": _cc_list},
+                          "saveToSentItems": "true"},
+                    timeout=15,
                 )
                 if _send_resp.status_code == 202:
-                    return True, "Email trimis cu succes!"
+                    return True, "Email trimis!"
                 return False, f"Graph API ({_send_resp.status_code}): {_send_resp.text[:200]}"
             except Exception as e:
                 return False, str(e)
 
-        col_reload, _ = st.columns([1, 5])
-        with col_reload:
-            if st.button("Reincarca template-uri", key="reload_templates"):
+        # ── Reload + Load ────────────────────────────────────────────────────
+        col_r, _ = st.columns([1, 5])
+        with col_r:
+            if st.button("🔄 Reincarca", key="reload_templates"):
                 st.cache_data.clear()
                 st.rerun()
 
         TEMPLATES_DB, SIGNATURE = load_email_templates()
         CONTACTS_DB = load_plant_contacts()
 
-        if not TEMPLATES_DB:
-            st.warning("Nu exista template-uri in Supabase.")
+        if not TEMPLATES_DB or not CONTACTS_DB:
+            st.warning("Nu exista template-uri sau contacte in Supabase.")
         else:
-            col_form, col_preview = st.columns([1, 1])
-
-            with col_form:
-                template_key = st.selectbox("Template", list(TEMPLATES_DB.keys()), key="notif_template")
-                cef_options  = ["(manual)"] + sorted(CONTACTS_DB.keys())
-                cef_select   = st.selectbox("Centrala", cef_options, key="notif_cef")
-
-                if cef_select != "(manual)":
-                    contact    = CONTACTS_DB.get(cef_select, {})
-                    cef_name_default = cef_select
-                    to_default = contact.get("to_email", "")
-                    cc_default = contact.get("cc_email", "")
-                else:
-                    cef_name_default = ""
-                    to_default = ""
-                    cc_default = "octavian.ciuca@mynexte.com, daniel.husaru@mynexte.com, liviu.dragan@mynexte.com"
-
-                # key dinamic per centrala — Streamlit creeaza widget nou la schimbare
-                _k = cef_select.replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
-
-                cef_name   = st.text_input("Nume CEF (in email)", value=cef_name_default, key=f"cef_name_{_k}")
+            # ── Parametri comuni ─────────────────────────────────────────────
+            st.markdown("#### Parametri comuni")
+            col_d, col_s, col_e = st.columns(3)
+            with col_d:
                 date_val   = st.date_input("Data oprire", key="notif_date")
-                col_s, col_e = st.columns(2)
-                with col_s:
-                    start_time = st.time_input("Ora start", value=None, key="notif_start", step=300)
-                with col_e:
-                    end_time   = st.time_input("Ora stop",  value=None, key="notif_end",   step=300)
-                to_email = st.text_input("To", value=to_default, key=f"notif_to_{_k}")
-                cc_email = st.text_input("CC", value=cc_default, key=f"notif_cc_{_k}")
+            with col_s:
+                start_time = st.time_input("Ora start", value=None, key="notif_start", step=300)
+            with col_e:
+                end_time   = st.time_input("Ora stop",  value=None, key="notif_end",   step=300)
 
-            tpl       = TEMPLATES_DB[template_key]
             date_str  = date_val.strftime("%d.%m.%Y") if date_val else ""
             start_str = start_time.strftime("%H:%M") if start_time else ""
             end_str   = end_time.strftime("%H:%M")   if end_time   else ""
 
-            try:
-                subject_preview = tpl["subject"].format(cef=cef_name, data=date_str, start=start_str, end=end_str)
-                body_preview    = tpl["body"].format(cef=cef_name, data=date_str, start=start_str, end=end_str)
-            except KeyError:
-                subject_preview = tpl["subject"]
-                body_preview    = tpl["body"]
+            st.markdown("---")
 
-            full_body = body_preview + ("\n\n" + SIGNATURE if SIGNATURE else "")
+            # ── Selectie centrale ─────────────────────────────────────────────
+            st.markdown("#### Centrale de notificat")
+            selected_cefs = st.multiselect(
+                "Selecteaza centralele",
+                options=sorted(CONTACTS_DB.keys()),
+                default=[],
+                key="notif_selected_cefs"
+            )
 
-            with col_preview:
-                st.markdown("**Preview:**")
-                st.text(f"To:      {to_email}")
-                st.text(f"CC:      {cc_email}")
-                st.text(f"Subject: {subject_preview}")
+            if not selected_cefs:
+                st.info("Selecteaza cel putin o centrala.")
+            else:
+                # ── Construieste emailurile per centrala ──────────────────────
+                emails = []
+                for cef in selected_cefs:
+                    contact  = CONTACTS_DB[cef]
+                    tpl_name = contact.get("default_template", list(TEMPLATES_DB.keys())[0])
+                    # Fallback daca template-ul nu mai exista
+                    if tpl_name not in TEMPLATES_DB:
+                        tpl_name = list(TEMPLATES_DB.keys())[0]
+                    tpl = TEMPLATES_DB[tpl_name]
+                    try:
+                        subject = tpl["subject"].format(cef=cef, data=date_str, start=start_str, end=end_str)
+                        body    = tpl["body"].format(cef=cef, data=date_str, start=start_str, end=end_str)
+                    except KeyError:
+                        subject = tpl["subject"]
+                        body    = tpl["body"]
+                    full_body = body + ("\n\n" + SIGNATURE if SIGNATURE else "")
+                    emails.append({
+                        "cef":      cef,
+                        "tpl_name": tpl_name,
+                        "to":       contact.get("to_email", ""),
+                        "cc":       contact.get("cc_email", ""),
+                        "subject":  subject,
+                        "body":     full_body,
+                        "tpl_id":   tpl.get("id"),
+                    })
+
+                # ── Preview si trimitere per centrala ─────────────────────────
+                st.markdown(f"**{len(emails)} email(uri) de trimis:**")
+
+                send_results = {}
+
+                for em in emails:
+                    _k = em["cef"].replace(" ", "_").replace("/", "_")
+                    with st.expander(f"📧 {em['cef']} → {em['to'][:40]}{'...' if len(em['to']) > 40 else ''}", expanded=True):
+                        col_l, col_r2 = st.columns([1, 1])
+                        with col_l:
+                            # Template override
+                            tpl_override = st.selectbox(
+                                "Template",
+                                options=list(TEMPLATES_DB.keys()),
+                                index=list(TEMPLATES_DB.keys()).index(em["tpl_name"]) if em["tpl_name"] in TEMPLATES_DB else 0,
+                                key=f"tpl_{_k}"
+                            )
+                            # Recalculeaza daca s-a schimbat template-ul
+                            if tpl_override != em["tpl_name"]:
+                                tpl2 = TEMPLATES_DB[tpl_override]
+                                try:
+                                    em["subject"] = tpl2["subject"].format(cef=em["cef"], data=date_str, start=start_str, end=end_str)
+                                    em["body"]    = tpl2["body"].format(cef=em["cef"], data=date_str, start=start_str, end=end_str) + ("\n\n" + SIGNATURE if SIGNATURE else "")
+                                except KeyError:
+                                    em["subject"] = tpl2["subject"]
+                                    em["body"]    = tpl2["body"]
+
+                            to_val = st.text_input("To",  value=em["to"], key=f"to_{_k}")
+                            cc_val = st.text_input("CC",  value=em["cc"], key=f"cc_{_k}")
+                            subj_val = st.text_input("Subject", value=em["subject"], key=f"subj_{_k}")
+
+                        with col_r2:
+                            st.markdown("**Preview body:**")
+                            st.text(em["body"][:800] + ("..." if len(em["body"]) > 800 else ""))
+
+                        if st.button(f"📤 Trimite catre {em['cef']}", key=f"send_{_k}"):
+                            with st.spinner("Se trimite..."):
+                                ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
+                            send_results[em["cef"]] = (ok, msg)
+                            if ok:
+                                st.success(f"✅ {msg}")
+                            else:
+                                st.error(f"❌ {msg}")
+
+                # ── Trimite toate ─────────────────────────────────────────────
                 st.markdown("---")
-                st.text(full_body)
+                if st.button("📤 Trimite TOATE emailurile", type="primary", key="send_all"):
+                    all_ok = True
+                    for em in emails:
+                        _k = em["cef"].replace(" ", "_").replace("/", "_")
+                        to_val   = st.session_state.get(f"to_{_k}",   em["to"])
+                        cc_val   = st.session_state.get(f"cc_{_k}",   em["cc"])
+                        subj_val = st.session_state.get(f"subj_{_k}", em["subject"])
+                        with st.spinner(f"Trimit catre {em['cef']}..."):
+                            ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
+                        if ok:
+                            st.success(f"✅ {em['cef']}: {msg}")
+                        else:
+                            st.error(f"❌ {em['cef']}: {msg}")
+                            all_ok = False
+                    if all_ok:
+                        st.balloons()
 
-            with st.expander("Editeaza template selectat", expanded=False):
-                st.caption("Modificarile se salveaza in Supabase.")
-                edit_subject = st.text_input("Subject", value=tpl["subject"], key="edit_subject")
-                edit_body    = st.text_area("Body",    value=tpl["body"],    key="edit_body", height=300)
-                if st.button("Salveaza modificarile", key="save_template"):
+            # ── Editor template (expandabil) ──────────────────────────────────
+            st.markdown("---")
+            with st.expander("✏️ Editeaza template-uri", expanded=False):
+                tpl_edit_key = st.selectbox("Template de editat", list(TEMPLATES_DB.keys()), key="edit_tpl_sel")
+                tpl_edit = TEMPLATES_DB[tpl_edit_key]
+                edit_subject = st.text_input("Subject", value=tpl_edit["subject"], key="edit_subject")
+                edit_body    = st.text_area("Body",     value=tpl_edit["body"],    key="edit_body", height=300)
+                if st.button("💾 Salveaza", key="save_template"):
                     try:
                         sb = create_client(SUPABASE_URL, SUPABASE_KEY)
                         sb.table("email_templates").update({
                             "subject":    edit_subject,
                             "body":       edit_body,
                             "updated_at": datetime.now(ZoneInfo("UTC")).isoformat(),
-                        }).eq("id", tpl["id"]).execute()
-                        st.success("Template salvat!")
+                        }).eq("id", tpl_edit["id"]).execute()
+                        st.success("✅ Template salvat!")
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Eroare salvare: {e}")
 
-            st.markdown("---")
-            if st.button("Trimite Email", type="primary", key="notif_send"):
-                if not to_email:
-                    st.error("Completeaza adresa To!")
-                else:
-                    with st.spinner("Se trimite..."):
-                        ok, msg = send_graph_email(to_email, cc_email, subject_preview, full_body)
-                    if ok:
-                        st.success(f"{msg}")
-                    else:
-                        st.error(f"Eroare: {msg}")
 
-    render_forecast_tab(tab6)
 
 
 
