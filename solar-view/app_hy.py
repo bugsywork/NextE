@@ -1791,34 +1791,25 @@ hr { border-color: #1e2330 !important; }
                 cef_options  = ["(manual)"] + sorted(CONTACTS_DB.keys())
                 cef_select   = st.selectbox("Centrala", cef_options, key="notif_cef")
 
-                # Detecteaza schimbarea centralei si reseteaza To/CC in session_state
-                if st.session_state.get("_notif_cef_prev") != cef_select:
-                    st.session_state["_notif_cef_prev"] = cef_select
-                    if cef_select != "(manual)":
-                        contact = CONTACTS_DB.get(cef_select, {})
-                        st.session_state["_notif_to"]       = contact.get("to_email", "")
-                        st.session_state["_notif_cc"]       = contact.get("cc_email", "")
-                        st.session_state["_notif_cef_name"] = cef_select
-                    else:
-                        st.session_state["_notif_to"]       = ""
-                        st.session_state["_notif_cc"]       = "octavian.ciuca@mynexte.com, daniel.husaru@mynexte.com, liviu.dragan@mynexte.com"
-                        st.session_state["_notif_cef_name"] = ""
+                if cef_select != "(manual)":
+                    contact    = CONTACTS_DB.get(cef_select, {})
+                    cef_name   = cef_select
+                    to_default = contact.get("to_email", "")
+                    cc_default = contact.get("cc_email", "")
+                else:
+                    cef_name   = ""
+                    to_default = ""
+                    cc_default = "octavian.ciuca@mynexte.com, daniel.husaru@mynexte.com, liviu.dragan@mynexte.com"
 
-                cef_name   = st.text_input("Nume CEF (in email)",
-                    value=st.session_state.get("_notif_cef_name", ""),
-                    key="notif_cef_name")
+                cef_name   = st.text_input("Nume CEF (in email)", value=cef_name, key="notif_cef_name")
                 date_val   = st.date_input("Data oprire", key="notif_date")
                 col_s, col_e = st.columns(2)
                 with col_s:
                     start_time = st.time_input("Ora start", value=None, key="notif_start", step=300)
                 with col_e:
                     end_time   = st.time_input("Ora stop",  value=None, key="notif_end",   step=300)
-                to_email = st.text_input("To",
-                    value=st.session_state.get("_notif_to", ""),
-                    key="notif_to")
-                cc_email = st.text_input("CC",
-                    value=st.session_state.get("_notif_cc", ""),
-                    key="notif_cc")
+                to_email   = st.text_input("To",  value=to_default,  key="notif_to")
+                cc_email   = st.text_input("CC",  value=cc_default,  key="notif_cc")
 
             tpl       = TEMPLATES_DB[template_key]
             date_str  = date_val.strftime("%d.%m.%Y") if date_val else ""
