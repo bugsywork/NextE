@@ -1269,9 +1269,9 @@ hr { border-color: #1e2330 !important; }
                 sel_date = st.date_input("Data", value=today, key="sched_date")
                 col2a, col2b = st.columns(2)
                 with col2a:
-                    sel_start = st.time_input("Ora start", value=_datetime_mod2.time(10, 0), key="sched_start", step=300)
+                    sel_start = st.time_input("Ora start", value=_datetime_mod2.time(10, 0), key="sched_start")
                 with col2b:
-                    sel_stop = st.time_input("Ora stop", value=_datetime_mod2.time(12, 0), key="sched_stop", step=300)
+                    sel_stop = st.time_input("Ora stop", value=_datetime_mod2.time(12, 0), key="sched_stop")
                 sel_notify = st.checkbox("Notifică client", value=True, key="sched_notify")
 
             if st.button("💾 Salvează programare", type="primary", key="sched_save"):
