@@ -1811,64 +1811,30 @@ District 5, 050881, Bucharest, Romania"""
         st.markdown("---")
         if st.button("📤 Trimite Email", type="primary"):
             try:
-                import requests as _req
+                import smtplib
+                from email.mime.text import MIMEText
+                from email.mime.multipart import MIMEMultipart
 
-                # Microsoft Graph API credentials din st.secrets
-                _client_id     = st.secrets["microsoft_graph"]["client_id"]
-                _tenant_id     = st.secrets["microsoft_graph"]["tenant_id"]
-                _client_secret = st.secrets["microsoft_graph"]["client_secret"]
-                _sender        = st.secrets["microsoft_graph"]["sender_email"]
+                email_user = st.secrets["email"]["user"]
+                email_pass = st.secrets["email"]["password"]
+                smtp_host  = st.secrets["email"]["smtp_host"]
+                smtp_port  = int(st.secrets["email"]["smtp_port"])
 
-                # 1. Obține token OAuth2
-                _token_url = f"https://login.microsoftonline.com/{_tenant_id}/oauth2/v2.0/token"
-                _token_resp = _req.post(_token_url, data={
-                    "grant_type":    "client_credentials",
-                    "client_id":     _client_id,
-                    "client_secret": _client_secret,
-                    "scope":         "https://graph.microsoft.com/.default",
-                }, timeout=15)
-                _token_resp.raise_for_status()
-                _access_token = _token_resp.json().get("access_token")
-                if not _access_token:
-                    st.error(f"❌ Nu am putut obține token Graph: {_token_resp.text[:200]}")
-                    st.stop()
+                msg = MIMEMultipart()
+                msg["From"]    = email_user
+                msg["To"]      = to_email
+                msg["CC"]      = cc_email
+                msg["Subject"] = subject_preview
+                msg.attach(MIMEText(body_preview, "plain", "utf-8"))
 
-                # 2. Construiește payload email
-                _to_list  = [{"emailAddress": {"address": e.strip()}} for e in to_email.split(",") if e.strip()]
-                _cc_list  = [{"emailAddress": {"address": e.strip()}} for e in cc_email.split(",") if e.strip()]
+                recipients = [e.strip() for e in (to_email + "," + cc_email).split(",") if e.strip()]
 
-                _mail_payload = {
-                    "message": {
-                        "subject": subject_preview,
-                        "body": {
-                            "contentType": "Text",
-                            "content": body_preview,
-                        },
-                        "toRecipients": _to_list,
-                        "ccRecipients": _cc_list,
-                    },
-                    "saveToSentItems": "true",
-                }
+                with smtplib.SMTP(smtp_host, smtp_port) as server:
+                    server.starttls()
+                    server.login(email_user, email_pass)
+                    server.sendmail(email_user, recipients, msg.as_string())
 
-                # 3. Trimite via Graph API
-                _send_url = f"https://graph.microsoft.com/v1.0/users/{_sender}/sendMail"
-                _send_resp = _req.post(
-                    _send_url,
-                    headers={
-                        "Authorization": f"Bearer {_access_token}",
-                        "Content-Type":  "application/json",
-                    },
-                    json=_mail_payload,
-                    timeout=15,
-                )
-
-                if _send_resp.status_code == 202:
-                    st.success(f"✅ Email trimis cu succes către {to_email}")
-                else:
-                    st.error(f"❌ Eroare Graph API ({_send_resp.status_code}): {_send_resp.text[:300]}")
-
-            except KeyError as e:
-                st.error(f"❌ Lipsește secretul: {e} — verifică st.secrets [microsoft_graph]")
+                st.success(f"✅ Email trimis către {to_email}")
             except Exception as e:
                 st.error(f"❌ Eroare trimitere email: {e}")
 
