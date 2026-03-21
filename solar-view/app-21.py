@@ -345,91 +345,6 @@ ALL_PLANTS = [
     "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
 ]
 
-# Metoda per planta — copie din schedule_executor.py / curtail_listener_v3.py
-# Trebuie mentinut sincron cu fisierele listener cand se adauga plante noi
-PLANTS_METHOD = {
-    "Ro_Ulmu_Fase2":           "shared",
-    "CEF ECORAY":              "smartlogger",
-    "CEF GIULIA SOLAR":        "smartlogger",
-    "FULVA 3125KW":            "smartlogger",
-    "KEK HAL 2100KW":          "smartlogger",
-    "Parc Fotovoltaic Codlea": "smartlogger",
-    "RAAL_PB_7.371MWp_6.02MW": "smartlogger",
-    "SunlightGreen":           "smartlogger",
-    "TopAgro_PV+BESS":         "smartlogger",
-    "Albesti":                 "shared",
-    "Skipass":                 "shared",
-    "Preferato":               "shared",
-    "Raimondenergy 1MW":       "shared",
-    "CEF KBO Sibiciu de sus":  "shared",
-    "CEF Domnesti":            "shared",
-    "RES_ENERGY_PVPP":         "smartlogger",
-    "Luxus_Energy_PVPP":       "station_logger",
-    "Trecon":                  "trecon",
-}
-
-# kw_max per planta — copie din inverter_config.py
-# Folosit pentru restore (trimite kw_max la invertor) si curtail procentual
-# Trebuie mentinut sincron cu inverter_config.py
-INVERTER_KW_MAX = {
-    "Albesti":                 838.0,
-    "CEF ECORAY":              1979.0,
-    "CEF GIULIA SOLAR":        2000.0,
-    "FULVA 3125KW":            3125.0,
-    "KEK HAL 2100KW":          2100.0,
-    "Parc Fotovoltaic Codlea": 2000.0,
-    "RAAL_PB_7.371MWp_6.02MW": 6020.0,
-    "SunlightGreen":           1600.0,
-    "TopAgro_PV+BESS":         770.0,
-    "RES_ENERGY_PVPP":         2400.0,
-    "Luxus_Energy_PVPP":       2925.0,
-    # Shared fara kw_max — restore foloseste kw_per_inverter din sets, nu kw_max
-    # Ro_Ulmu_Fase2, Skipass, Preferato, Raimondenergy 1MW,
-    # CEF KBO Sibiciu de sus, CEF Domnesti — kw_max None → listener le ignora la restore
-}
-
-
-def pct_to_kw_app(plant: str, pct: float, action: str):
-    """
-    Calculeaza kw de trimis in curtail_commands pentru o planta.
-    Logica identica cu schedule_executor.pct_to_kw().
-
-    Returns: float kw — valoarea de pus in payload
-             None — planta trebuie sarita (kw_max lipsa pentru restore/curtail partial)
-
-    Reguli:
-      - Trecon: 0.0 (listener propriu ignora kw, il trateaza intern)
-      - curtail 0%: shared → 0.1 kW, altele → 0.0 kW
-      - curtail >0%: kw_max * pct/100 (skip daca kw_max None)
-      - restore:  kw_max (skip daca kw_max None, exceptie shared care are sets in listener)
-    """
-    method = PLANTS_METHOD.get(plant, "smartlogger")
-
-    # Trecon — listener propriu, kw irelevant
-    if method == "trecon":
-        return 0.0
-
-    kw_max = INVERTER_KW_MAX.get(plant)  # None daca nu e definit
-
-    if action == "restore":
-        if method == "shared":
-            # Shared plants: listenerii folosesc kw_per_inverter din INVERTER_CONFIG.sets
-            # Nu avem kw_max global → trimitem None si listenerii stiu ce sa faca
-            # (curtail_listener foloseste kw_per_inverter la restore pentru shared)
-            return None  # listener ignora kw la restore shared, foloseste sets intern
-        if kw_max is None:
-            return None  # skip — listener va sari planta
-        return float(kw_max)
-
-    # curtail
-    if pct == 0:
-        return 0.1 if method == "shared" else 0.0
-
-    # curtail partial (pct > 0)
-    if kw_max is None:
-        return None  # skip — nu stim kw_max
-    return round(float(kw_max) * pct / 100, 1)
-
 
 def main():
 
@@ -1064,17 +979,11 @@ hr { border-color: #1e2330 !important; }
                 except Exception as e:
                     return []
 
-            def send_curtail_command(action: str, plants: list = None, pct: float = 0.0):
-                """
-                Trimite comanda curtail/restore in Supabase.
-                pct: 0-100 (procent setpoint). 0 = oprire completa.
-                kw per planta calculat via pct_to_kw_app().
-                Plantele fara kw_max definit sunt sarite la curtail partial si restore.
-                """
+            def send_curtail_command(action: str, plants: list = None):
                 try:
                     import uuid as _uuid
                     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-                    # Idempotency — verifica daca exista deja o comanda identica pending/running
+                    # H: idempotency — verifica daca exista deja o comanda identica pending/running
                     # in ultimele 60 secunde (double-click protection)
                     recent = supabase.table("curtail_commands") \
                         .select("id,created_at") \
@@ -1093,43 +1002,16 @@ hr { border-color: #1e2330 !important; }
                                 return False, f"⚠️ Comandă {action.upper()} deja în curs (acum {int(age_s)}s). Așteaptă finalizarea."
                         except Exception:
                             pass
-
-                    target_plants = plants if plants else ALL_PLANTS
-
-                    # Calculeaza kw per planta si filtreaza plantele invalide
-                    valid_plants = []
-                    kw_send = 0.0  # kw pentru prima planta non-Trecon (listenerii folosesc acelasi kw)
-                    skipped = []
-                    for plant in target_plants:
-                        kw_val = pct_to_kw_app(plant, pct, action)
-                        if kw_val is None:
-                            skipped.append(plant)
-                            continue
-                        valid_plants.append(plant)
-                        # kw_send = valoarea non-Trecon (Trecon are listener propriu)
-                        if PLANTS_METHOD.get(plant) != "trecon" and kw_send == 0.0 and kw_val > 0:
-                            kw_send = kw_val
-
-                    if not valid_plants:
-                        return False, f"⚠️ Nicio plantă validă — toate au kw_max nedefinit."
-
-                    if skipped:
-                        # Nu blocam, doar informam — listenerii vor sari oricum
-                        pass
-
                     payload = {
-                        "action":      action,
-                        "kw":          kw_send,
-                        "plants":      valid_plants,
-                        "status":      "pending",
-                        "created_at":  datetime.now(ZoneInfo("UTC")).isoformat(),
-                        "command_uid": str(_uuid.uuid4()),
+                        "action":     action,
+                        "kw":         0.0 if action == "curtail" else 99999.0,
+                        "plants":     plants if plants else ALL_PLANTS,
+                        "status":     "pending",
+                        "created_at": datetime.now(ZoneInfo("Europe/Bucharest")).isoformat(),
+                        "command_uid": str(_uuid.uuid4()),  # H: dedup key
                     }
                     result = supabase.table("curtail_commands").insert(payload).execute()
-                    msg = "Comandă trimisă cu succes!"
-                    if skipped:
-                        msg += f" (sărite fără kw_max: {', '.join(skipped)})"
-                    return True, msg
+                    return True, "Comandă trimisă cu succes!"
                 except Exception as e:
                     return False, f"Eroare: {str(e)}"
 
@@ -1141,31 +1023,16 @@ hr { border-color: #1e2330 !important; }
                     action = last_cmd.get('action', 'unknown').upper()
                     status = last_cmd.get('status', 'unknown')
                     ts = last_cmd.get('created_at', '')[:16].replace('T', ' ')
-                    kw_last = last_cmd.get('kw', 0)
                     if action == 'CURTAIL':
                         st.error(f"🔴 **CURTAILED**")
                     else:
                         st.success(f"🟢 **RESTORED**")
-                    st.caption(f"Status: `{status}` | {ts} | kw={kw_last}")
+                    st.caption(f"Status: `{status}` | {ts}")
                 else:
                     st.info("ℹ️ Nicio comandă anterioară")
 
             with col_info:
-                # ── Setpoint % slider ────────────────────────────────────────
-                curtail_pct = st.slider(
-                    "Setpoint curtailment (%)",
-                    min_value=0, max_value=100, value=0, step=5,
-                    key="curtail_pct_slider",
-                    help="0% = oprire completă | 50% = jumătate din puterea nominală | 100% = fără limitare (echivalent Restore)"
-                )
-                if curtail_pct == 0:
-                    st.caption("🔴 0% — oprire completă (shared: 0.1 kW, smartlogger: 0 kW)")
-                elif curtail_pct == 100:
-                    st.caption("🟢 100% — fără limitare (folosește Restore pentru a readuce la kw_max)")
-                else:
-                    st.caption(f"🟡 {curtail_pct}% din puterea nominală per centrală")
-
-                st.markdown("**Comandă rapidă — toate cele 18 centrale:**")
+                st.markdown("**Comandă rapidă — toate cele 17 centrale:**")
                 col_c, col_r = st.columns(2)
                 with col_c:
                     if st.button("🔴 CURTAIL ALL", type="primary", use_container_width=True,
@@ -1181,7 +1048,7 @@ hr { border-color: #1e2330 !important; }
                                      use_container_width=True):
                             st.session_state["curtail_in_progress"] = True
                             st.session_state["confirm_curtail_all"] = False
-                            ok, msg = send_curtail_command("curtail", ALL_PLANTS, pct=curtail_pct)
+                            ok, msg = send_curtail_command("curtail", ALL_PLANTS)
                             st.session_state["curtail_in_progress"] = False
                             if ok:
                                 st.success(msg)
@@ -1208,7 +1075,7 @@ hr { border-color: #1e2330 !important; }
                                      use_container_width=True):
                             st.session_state["curtail_in_progress"] = True
                             st.session_state["confirm_restore_all"] = False
-                            ok, msg = send_curtail_command("restore", ALL_PLANTS, pct=100.0)
+                            ok, msg = send_curtail_command("restore", ALL_PLANTS)
                             st.session_state["curtail_in_progress"] = False
                             if ok:
                                 st.success(msg)
@@ -1225,7 +1092,7 @@ hr { border-color: #1e2330 !important; }
 
             # ---- Selective plant curtailment ----
             with st.expander("🎯 Comandă selectivă — centrale individuale"):
-                select_all = st.checkbox("Toate centralele (18)", value=False)
+                select_all = st.checkbox("Toate centralele (17)", value=False)
                 if select_all:
                     selected_plants = ALL_PLANTS
                 else:
@@ -1234,15 +1101,7 @@ hr { border-color: #1e2330 !important; }
                         options=ALL_PLANTS,
                         default=[]
                     )
-
                 if selected_plants:
-                    sel_pct = st.slider(
-                        "Setpoint (%)",
-                        min_value=0, max_value=100, value=0, step=5,
-                        key="curtail_sel_pct",
-                        help="0% = oprire completă"
-                    )
-
                     col_cs, col_rs = st.columns(2)
                     with col_cs:
                         if st.button(f"🔴 CURTAIL ({len(selected_plants)})", key="curtail_sel",
@@ -1256,13 +1115,13 @@ hr { border-color: #1e2330 !important; }
                             st.session_state["confirm_restore_sel"] = True
 
                     if st.session_state.get("confirm_curtail_sel"):
-                        st.error(f"⚠️ Confirmare CURTAIL {sel_pct}% pentru: **{', '.join(selected_plants[:3])}{'...' if len(selected_plants) > 3 else ''}**")
+                        st.error(f"⚠️ Confirmare CURTAIL pentru: **{', '.join(selected_plants[:3])}{'...' if len(selected_plants) > 3 else ''}**")
                         col_yc, col_nc = st.columns(2)
                         with col_yc:
                             if st.button("✅ Da, curtail", key="confirm_curtail_sel_yes", use_container_width=True):
                                 st.session_state["curtail_in_progress"] = True
                                 st.session_state["confirm_curtail_sel"] = False
-                                ok, msg = send_curtail_command("curtail", selected_plants, pct=sel_pct)
+                                ok, msg = send_curtail_command("curtail", selected_plants)
                                 st.session_state["curtail_in_progress"] = False
                                 if ok:
                                     st.success(msg)
@@ -1282,7 +1141,7 @@ hr { border-color: #1e2330 !important; }
                             if st.button("✅ Da, restore", key="confirm_restore_sel_yes", use_container_width=True):
                                 st.session_state["curtail_in_progress"] = True
                                 st.session_state["confirm_restore_sel"] = False
-                                ok, msg = send_curtail_command("restore", selected_plants, pct=100.0)
+                                ok, msg = send_curtail_command("restore", selected_plants)
                                 st.session_state["curtail_in_progress"] = False
                                 if ok:
                                     st.success(msg)
