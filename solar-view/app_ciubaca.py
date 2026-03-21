@@ -929,92 +929,35 @@ hr { border-color: #1e2330 !important; }
     with tab2:
         st.markdown("### ⚡ Curtailment Control")
 
-        # ── Session state init ────────────────────────────────────────────────
-        for _k, _v in [
-            ("curtail_authenticated", False),
-            ("curtail_auth_time", None),
-            ("curtail_auth_user", None),
-            ("curtail_login_attempts", 0),
-            ("curtail_lockout_until", None),
-        ]:
-            if _k not in st.session_state:
-                st.session_state[_k] = _v
+        # Password protection + session timeout 2h
+        if "curtail_authenticated" not in st.session_state:
+            st.session_state["curtail_authenticated"] = False
+            st.session_state["curtail_auth_time"] = None
 
-        MAX_ATTEMPTS    = 5
-        LOCKOUT_SECONDS = 900   # 15 min
-        SESSION_TIMEOUT = 7200  # 2h
-
-        # ── Verifică timeout sesiune 2h ───────────────────────────────────────
+        # Verifică timeout 2h
         if st.session_state["curtail_authenticated"]:
             auth_time = st.session_state.get("curtail_auth_time")
-            if auth_time and (datetime.now() - auth_time).total_seconds() > SESSION_TIMEOUT:
+            if auth_time and (datetime.now() - auth_time).total_seconds() > 7200:
                 st.session_state["curtail_authenticated"] = False
                 st.session_state["curtail_auth_time"] = None
-                st.session_state["curtail_auth_user"] = None
                 st.warning("⏱️ Sesiunea a expirat (2h). Re-autentificare necesară.")
 
         if not st.session_state["curtail_authenticated"]:
             st.warning("🔒 Acces restricționat")
-
-            # ── Verifică lockout ──────────────────────────────────────────────
-            lockout_until = st.session_state.get("curtail_lockout_until")
-            now_dt = datetime.now()
-            if lockout_until and now_dt < lockout_until:
-                remaining = int((lockout_until - now_dt).total_seconds())
-                st.error(f"🚫 Prea multe încercări eșuate. Încearcă din nou în **{remaining // 60}m {remaining % 60}s**.")
-                st.stop()
-            elif lockout_until and now_dt >= lockout_until:
-                st.session_state["curtail_login_attempts"] = 0
-                st.session_state["curtail_lockout_until"] = None
-
-            attempts = st.session_state.get("curtail_login_attempts", 0)
-            if attempts > 0:
-                st.caption(f"⚠️ {attempts}/{MAX_ATTEMPTS} încercări eșuate.")
-
-            # ── Login form ────────────────────────────────────────────────────
-            _col_u, _col_p = st.columns(2)
-            with _col_u:
-                username_input = st.text_input("Utilizator:", key="curtail_username", placeholder="remus / sebastian / daniel")
-            with _col_p:
-                pwd = st.text_input("Parolă:", type="password", key="curtail_pwd")
-
+            pwd = st.text_input("Parolă:", type="password", key="curtail_pwd")
             if st.button("Autentificare", key="curtail_login"):
-                users = st.secrets.get("curtail_users", {})
-                if not users:
-                    st.error("❌ Niciun utilizator configurat în secrets!")
-                elif not username_input:
-                    st.error("❌ Introdu un nume de utilizator.")
-                else:
-                    expected = users.get(username_input.lower().strip(), "")
-                    if expected and pwd and hmac.compare_digest(pwd, expected):
-                        st.session_state["curtail_authenticated"] = True
-                        st.session_state["curtail_auth_time"] = datetime.now()
-                        st.session_state["curtail_auth_user"] = username_input.lower().strip()
-                        st.session_state["curtail_login_attempts"] = 0
-                        st.session_state["curtail_lockout_until"] = None
-                        st.rerun()
-                    else:
-                        st.session_state["curtail_login_attempts"] = attempts + 1
-                        if st.session_state["curtail_login_attempts"] >= MAX_ATTEMPTS:
-                            st.session_state["curtail_lockout_until"] = datetime.now() + timedelta(seconds=LOCKOUT_SECONDS)
-                            st.error(f"🚫 {MAX_ATTEMPTS} încercări eșuate — blocat 15 minute!")
-                        else:
-                            st.error(f"❌ Utilizator sau parolă incorectă ({st.session_state['curtail_login_attempts']}/{MAX_ATTEMPTS})")
-        else:
-            # ── Utilizator autentificat — afișare info sesiune ────────────────
-            _auth_user = st.session_state.get("curtail_auth_user", "?")
-            _auth_time = st.session_state.get("curtail_auth_time")
-            _auth_age  = int((datetime.now() - _auth_time).total_seconds() / 60) if _auth_time else 0
-            _col_user, _col_logout = st.columns([4, 1])
-            with _col_user:
-                st.caption(f"✅ Autentificat ca **{_auth_user}** · sesiune activă de {_auth_age} min · expiră în {max(0, 120 - _auth_age)} min")
-            with _col_logout:
-                if st.button("🚪 Logout", key="curtail_logout", use_container_width=True):
-                    st.session_state["curtail_authenticated"] = False
-                    st.session_state["curtail_auth_time"] = None
-                    st.session_state["curtail_auth_user"] = None
+                expected = st.secrets.get("curtail_password", "")
+                if not expected:
+                    st.error("❌ Parola nu este configurată în secrets!")
+                elif pwd and hmac.compare_digest(pwd, expected):
+                    st.session_state["curtail_authenticated"] = True
+                    st.session_state["curtail_auth_time"] = datetime.now()
                     st.rerun()
-            st.divider()
+                else:
+                    st.error("❌ Parolă incorectă")
+        else:
+
+            # ── A: Heartbeat check — listeneri activi? ────────────────────────
             def get_service_health():
                 try:
                     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -1182,16 +1125,11 @@ hr { border-color: #1e2330 !important; }
                         "status":      "pending",
                         "created_at":  datetime.now(ZoneInfo("UTC")).isoformat(),
                         "command_uid": str(_uuid.uuid4()),
-                        # ── Audit trail ──────────────────────────────────────
-                        "created_by":  st.session_state.get("curtail_auth_user", "unknown"),
-                        "pct_setpoint": pct,
-                        "skipped_plants": skipped if skipped else None,
                     }
                     result = supabase.table("curtail_commands").insert(payload).execute()
-                    cmd_id = result.data[0]["id"] if result.data else "?"
-                    msg = f"Comandă trimisă! ID: `{str(cmd_id)[:8]}`"
+                    msg = "Comandă trimisă cu succes!"
                     if skipped:
-                        msg += f" | Sărite (fără kw_max): {', '.join(skipped)}"
+                        msg += f" (sărite fără kw_max: {', '.join(skipped)})"
                     return True, msg
                 except Exception as e:
                     return False, f"Eroare: {str(e)}"
