@@ -1151,18 +1151,17 @@ hr { border-color: #1e2330 !important; }
                     st.info("ℹ️ Nicio comandă anterioară")
 
             with col_info:
-                # ── Setpoint % input ────────────────────────────────────────
-                curtail_pct = st.number_input(
+                # ── Setpoint % slider ────────────────────────────────────────
+                curtail_pct = st.slider(
                     "Setpoint curtailment (%)",
-                    min_value=0.0, max_value=100.0, value=0.0, step=10.0,
-                    format="%.1f",
-                    key="curtail_pct_input",
-                    help="0% = oprire completă | 99.9% = aproape fără limitare | 100% = fără limitare"
+                    min_value=0, max_value=100, value=0, step=5,
+                    key="curtail_pct_slider",
+                    help="0% = oprire completă | 50% = jumătate din puterea nominală | 100% = fără limitare (echivalent Restore)"
                 )
-                if curtail_pct == 0.0:
+                if curtail_pct == 0:
                     st.caption("🔴 0% — oprire completă (shared: 0.1 kW, smartlogger: 0 kW)")
-                elif curtail_pct == 100.0:
-                    st.caption("🟢 100% — fără limitare")
+                elif curtail_pct == 100:
+                    st.caption("🟢 100% — fără limitare (folosește Restore pentru a readuce la kw_max)")
                 else:
                     st.caption(f"🟡 {curtail_pct}% din puterea nominală per centrală")
 
@@ -1237,12 +1236,11 @@ hr { border-color: #1e2330 !important; }
                     )
 
                 if selected_plants:
-                    sel_pct = st.number_input(
+                    sel_pct = st.slider(
                         "Setpoint (%)",
-                        min_value=0.0, max_value=100.0, value=0.0, step=10.0,
-                        format="%.1f",
+                        min_value=0, max_value=100, value=0, step=5,
                         key="curtail_sel_pct",
-                        help="0% = oprire completă | 99.9% = aproape fără limitare"
+                        help="0% = oprire completă"
                     )
 
                     col_cs, col_rs = st.columns(2)
