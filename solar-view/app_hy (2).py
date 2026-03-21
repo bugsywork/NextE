@@ -1152,23 +1152,19 @@ hr { border-color: #1e2330 !important; }
 
             with col_info:
                 # ── Setpoint % input ────────────────────────────────────────
-                _col_pct, _col_cap = st.columns([1, 3])
-                with _col_pct:
-                    curtail_pct = st.number_input(
-                        "Setpoint (%)",
-                        min_value=0.0, max_value=100.0, value=0.0, step=10.0,
-                        format="%.1f",
-                        key="curtail_pct_input",
-                        help="0% = oprire completă | 99.9% = aproape fără limitare | 100% = fără limitare"
-                    )
-                with _col_cap:
-                    st.write("")
-                    if curtail_pct == 0.0:
-                        st.caption("🔴 0% — oprire completă (shared: 0.1 kW, smartlogger: 0 kW)")
-                    elif curtail_pct == 100.0:
-                        st.caption("🟢 100% — fără limitare")
-                    else:
-                        st.caption(f"🟡 {curtail_pct}% din puterea nominală per centrală")
+                curtail_pct = st.number_input(
+                    "Setpoint curtailment (%)",
+                    min_value=0.0, max_value=100.0, value=0.0, step=10.0,
+                    format="%.1f",
+                    key="curtail_pct_input",
+                    help="0% = oprire completă | 99.9% = aproape fără limitare | 100% = fără limitare"
+                )
+                if curtail_pct == 0.0:
+                    st.caption("🔴 0% — oprire completă (shared: 0.1 kW, smartlogger: 0 kW)")
+                elif curtail_pct == 100.0:
+                    st.caption("🟢 100% — fără limitare")
+                else:
+                    st.caption(f"🟡 {curtail_pct}% din puterea nominală per centrală")
 
                 st.markdown("**Comandă rapidă — toate cele 18 centrale:**")
                 col_c, col_r = st.columns(2)
@@ -1241,23 +1237,13 @@ hr { border-color: #1e2330 !important; }
                     )
 
                 if selected_plants:
-                    _col_spct, _col_scap = st.columns([1, 3])
-                    with _col_spct:
-                        sel_pct = st.number_input(
-                            "Setpoint (%)",
-                            min_value=0.0, max_value=100.0, value=0.0, step=10.0,
-                            format="%.1f",
-                            key="curtail_sel_pct",
-                            help="0% = oprire completă | 99.9% = aproape fără limitare"
-                        )
-                    with _col_scap:
-                        st.write("")
-                        if sel_pct == 0.0:
-                            st.caption("🔴 0% — oprire completă")
-                        elif sel_pct == 100.0:
-                            st.caption("🟢 100% — fără limitare")
-                        else:
-                            st.caption(f"🟡 {sel_pct}% din puterea nominală")
+                    sel_pct = st.number_input(
+                        "Setpoint (%)",
+                        min_value=0.0, max_value=100.0, value=0.0, step=10.0,
+                        format="%.1f",
+                        key="curtail_sel_pct",
+                        help="0% = oprire completă | 99.9% = aproape fără limitare"
+                    )
 
                     col_cs, col_rs = st.columns(2)
                     with col_cs:
