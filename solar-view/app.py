@@ -731,8 +731,8 @@ hr { border-color: #1e2330 !important; }
 
         if data_age_minutes > 5:
             st.error(
-                f"🚨 DATE VECHI! Ultimul update acum **{data_age_minutes:.0f} minute**! "
-                f"Verifică dacă `master_report_updater_v3.py` rulează corect."
+                f"🚨 STALE DATA! Last update **{data_age_minutes:.0f} minutes** ago! "
+                f"Check if `master_report_updater_v3.py` is running correctly."
             )
         elif data_age_minutes > 2:
             st.warning(
@@ -801,12 +801,12 @@ hr { border-color: #1e2330 !important; }
 
 
         if data_age_minutes < 1:
-            age_label = "acum câteva secunde"
+            age_label = "just now"
         else:
-            age_label = f"{data_age_minutes:.0f} min în urmă"
+            age_label = f"{data_age_minutes:.0f} min ago"
 
-        st.caption(f"📅 Ultimul update: {timestamp.strftime('%Y-%m-%d %H:%M:%S')} ({age_label})")
-        st.caption(f"🔄 Pagina refreshed la: {bucharest_now.strftime('%Y-%m-%d %H:%M:%S')}")
+        st.caption(f"📅 Last update: {timestamp.strftime('%Y-%m-%d %H:%M:%S')} ({age_label})")
+        st.caption(f"🔄 Page refreshed at: {bucharest_now.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # ====================================================================
         # PIE CHART
@@ -1194,7 +1194,7 @@ hr { border-color: #1e2330 !important; }
                     cmd_id = result.data[0]["id"] if result.data else "?"
                     msg = f"Command sent! ID: `{str(cmd_id)[:8]}`"
                     if skipped:
-                        msg += f" | Sărite (fără kw_max): {', '.join(skipped)}"
+                        msg += f" | Skipped (no kw_max): {', '.join(skipped)}"
                     return True, msg
                 except Exception as e:
                     return False, f"Error: {str(e)}"
@@ -1951,7 +1951,7 @@ hr { border-color: #1e2330 !important; }
             st.stop()
 
         if not sen_latest:
-            st.warning("⏳ Se încarcă datele SEN...")
+            st.warning("⏳ Loading SEN data...")
             st.stop()
 
         # ---- Extract values ----
@@ -1980,22 +1980,22 @@ hr { border-color: #1e2330 !important; }
         # ============================================================
         if risc_score >= 2:
             st.error(
-                f"⚠️ **RISC PREȚ NEGATIV** — Solar: {fotovolt:.0f} MW | "
-                f"Export: {sold:.0f} MW | Surplus retea: {surplus_mw:+.0f} MW  |  "
-                f"Verificați OPCOM și considerați curtailment!"
+                f"⚠️ **NEGATIVE PRICE RISK** — Solar: {fotovolt:.0f} MW | "
+                f"Export: {sold:.0f} MW | Grid surplus: {surplus_mw:+.0f} MW  |  "
+                f"Check OPCOM and consider curtailment!"
             )
         elif risc_score == 1:
             st.warning(
-                f"🟡 **Atenție** — Condiții parțiale de risc. "
-                f"Solar RO: {fotovolt:.0f} MW | Sold: {sold:+.0f} MW"
+                f"🟡 **Attention** — Partial risk conditions. "
+                f"Solar RO: {fotovolt:.0f} MW | Balance: {sold:+.0f} MW"
             )
         else:
             st.success(
-                f"🟢 **Condiții normale** — Solar RO: {fotovolt:.0f} MW | "
-                f"Sold: {sold:+.0f} MW ({'export' if sold > 0 else 'import'})"
+                f"🟢 **Normal conditions** — Solar RO: {fotovolt:.0f} MW | "
+                f"Balance: {sold:+.0f} MW ({'export' if sold > 0 else 'import'})"
             )
 
-        st.caption(f"🕐 Date SEN: **{ts}** · Actualizare automată la 2 min · sursa: sistemulenergetic.ro")
+        st.caption(f"🕐 SEN data: **{ts}** · Auto-update every 2 min · source: sistemulenergetic.ro")
         st.markdown("---")
 
         # ============================================================
@@ -2005,17 +2005,17 @@ hr { border-color: #1e2330 !important; }
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.metric(
-                "⚡ Consum național",
+                "⚡ National consumption",
                 f"{putere_ceruta:,.0f} MW",
-                help="Puterea cerută de consumatori în acest moment"
+                help="Power demanded by consumers at this moment"
             )
         with c2:
             st.metric(
-                "🏭 Producție totală",
+                "🏭 Total production",
                 f"{putere_debitata:,.0f} MW",
-                delta=f"{surplus_mw:+.0f} MW față de consum",
+                delta=f"{surplus_mw:+.0f} MW vs consumption",
                 delta_color="inverse" if surplus_mw > 300 else "normal",
-                help="Puterea injectată în rețea. Dacă e mult > consum = risc preț negativ"
+                help="Power injected into grid. If much > consumption = negative price risk"
             )
         with c3:
             sold_icon = "📤" if sold > 0 else "📥"
@@ -2023,9 +2023,9 @@ hr { border-color: #1e2330 !important; }
             st.metric(
                 f"{sold_icon} Sold ({sold_label})",
                 f"{abs(sold):,.0f} MW",
-                delta="↑ surplus" if sold > 500 else ("≈ echilibru" if abs(sold) < 200 else "↓ deficit"),
+                delta="↑ surplus" if sold > 500 else ("≈ balanced" if abs(sold) < 200 else "↓ deficit"),
                 delta_color="inverse" if sold > 500 else "normal",
-                help="Export = producem mai mult decât consumăm. Export mare → prețuri mici/negative"
+                help="Export = we produce more than we consume. High export → low/negative prices"
             )
         with c4:
             solar_pct = (fotovolt / putere_debitata * 100) if putere_debitata > 0 else 0
@@ -2033,9 +2033,9 @@ hr { border-color: #1e2330 !important; }
             st.metric(
                 f"{solar_icon} Solar RO",
                 f"{fotovolt:,.0f} MW",
-                delta=f"{solar_pct:.1f}% din producție",
+                delta=f"{solar_pct:.1f}% of production",
                 delta_color="inverse" if risc_solar else "off",
-                help="Producție fotovoltaică națională. >1500 MW = risc preț negativ în orele de vârf"
+                help="National PV production. >1500 MW = negative price risk during peak hours"
             )
 
         st.markdown("---")
@@ -2060,7 +2060,7 @@ hr { border-color: #1e2330 !important; }
                 # Zona de risc (linie orizontala la 1500 MW)
                 fig.add_hline(
                     y=1500, line_dash="dash", line_color="rgba(255,80,80,0.5)",
-                    annotation_text="Prag risc solar (1500 MW)",
+                    annotation_text="Solar risk threshold (1500 MW)",
                     annotation_position="bottom right"
                 )
                 fig.add_trace(go.Scatter(
@@ -2083,11 +2083,11 @@ hr { border-color: #1e2330 !important; }
                     yaxis="y2"
                 ))
                 fig.update_layout(
-                    title="Producție Regenerabilă vs Consum — ultimele 2h",
+                    title="Renewable Production vs Consumption — last 2h",
                     height=380,
                     margin=dict(t=40, b=40, l=60, r=60),
                     legend=dict(orientation="h", y=-0.25),
-                    yaxis=dict(title="MW producție / consum"),
+                    yaxis=dict(title="MW production / consumption"),
                     yaxis2=dict(
                         title="Sold (MW)",
                         overlaying="y", side="right",
@@ -2105,15 +2105,15 @@ hr { border-color: #1e2330 !important; }
         # ============================================================
         # ZONA 4: MIX ENERGETIC — bara progres vizuala
         # ============================================================
-        st.markdown("#### 🔋 Mix energetic instant")
+        st.markdown("#### 🔋 Instant energy mix")
 
         surse = [
-            ("💧 Hidro",        hidro,        "#1E90FF"),
+            ("💧 Hydro",        hidro,        "#1E90FF"),
             ("☢️ Nuclear",      nuclear,      "#9B59B6"),
-            ("🔥 Hidrocarburi", hidrocarburi, "#E67E22"),
+            ("🔥 Hydrocarbons",  hidrocarburi, "#E67E22"),
             ("☀️ Solar",        fotovolt,     "#FFA500"),
             ("💨 Eolian",       eolian,       "#00BFFF"),
-            ("⬛ Cărbune",      carbune,      "#7F8C8D"),
+            ("⬛ Coal",         carbune,      "#7F8C8D"),
         ]
         total_prod = putere_debitata if putere_debitata > 0 else 1
 
@@ -2147,8 +2147,8 @@ hr { border-color: #1e2330 !important; }
         # ============================================================
         # ZONA 5: GRAFIC ZIUA COMPLETĂ (expandabil)
         # ============================================================
-        with st.expander("📊 Evoluție ziua completă (0:00 → acum)", expanded=False):
-            with st.spinner("Se încarcă datele zilei..."):
+        with st.expander("📊 Full day evolution (0:00 → now)", expanded=False):
+            with st.spinner("Loading today's data..."):
                 history_rows, hist_error = get_sen_history()
             if hist_error:
                 st.error(hist_error)
@@ -2167,7 +2167,7 @@ hr { border-color: #1e2330 !important; }
                 if h_dates:
                     fig2 = go.Figure()
                     fig2.add_hline(y=1500, line_dash="dash", line_color="rgba(255,80,80,0.4)",
-                                   annotation_text="Prag risc 1500 MW")
+                                   annotation_text="Risk threshold 1500 MW")
                     fig2.add_trace(go.Scatter(
                         x=h_dates, y=h_solar, name="☀️ Solar",
                         line=dict(color="#FFA500", width=2),
@@ -2479,7 +2479,7 @@ def render_forecast_tab(tab):
         if not df_actual.empty and not df_forecast.empty:
             with st.expander("📋 Detailed data"):
                 merged_full = pd.merge(df_actual, df_forecast, on='ts', how='outer').sort_values('ts')
-                merged_full['realizare_%'] = (merged_full['power_kw'] / merged_full['forecast_kw'] * 100).round(1)
+                merged_full['achievement_%'] = (merged_full['power_kw'] / merged_full['forecast_kw'] * 100).round(1)
                 merged_full['ts'] = merged_full['ts'].dt.strftime('%d.%m.%Y %H:%M')
                 merged_full.columns = ['Timestamp', 'Actual (kW)', 'Forecast (kW)', 'Achievement (%)']
                 st.dataframe(merged_full, use_container_width=True, hide_index=True)
