@@ -1658,49 +1658,19 @@ hr { border-color: #1e2330 !important; }
                                     try:
                                         plants_exec = j.get("plants") or [j.get("plant_name")]
                                         if isinstance(plants_exec, str):
-                                            try:
-                                                plants_exec = _json.loads(plants_exec)
-                                            except Exception:
-                                                plants_exec = [plants_exec]
-                                        # Conversia % → kW via pct_to_kw_app (la fel ca Tab 2)
-                                        _pct_exec = float(j.get("kw", 0))
-                                        _action_exec = j.get("action_start", "curtail")
-                                        _valid_exec = []
-                                        _kw_exec = 0.0
-                                        _skipped_exec = []
-                                        for _p in plants_exec:
-                                            _kv = pct_to_kw_app(_p, _pct_exec, _action_exec)
-                                            if _kv is None:
-                                                _skipped_exec.append(_p)
-                                                continue
-                                            _valid_exec.append(_p)
-                                            if PLANTS_METHOD.get(_p) != "trecon" and _kw_exec == 0.0 and _kv > 0:
-                                                _kw_exec = _kv
-                                        if not _valid_exec:
-                                            st.error("❌ Nicio plantă validă — kw_max nedefinit pentru toate.")
-                                        else:
-                                            import uuid as _uuid_exec
-                                            _sb_exec = create_client(SUPABASE_URL, SUPABASE_KEY)
-                                            _sb_exec.table("curtail_commands").insert({
-                                                "action":      _action_exec,
-                                                "plants":      _valid_exec,
-                                                "kw":          _kw_exec,
-                                                "status":      "pending",
-                                                "created_at":  _dt.now(_tz.utc).isoformat(),
-                                                "command_uid": str(_uuid_exec.uuid4()),
-                                                "created_by":  st.session_state.get("curtail_auth_user", "unknown"),
-                                                "pct_setpoint": _pct_exec,
-                                                "skipped_plants": _skipped_exec or None,
-                                            }).execute()
-                                            _sb_exec.table("curtail_schedule").update({
-                                                "status":      "active",
-                                                "actual_start": _dt.now(_tz.utc).isoformat(),
-                                            }).eq("id", j["id"]).execute()
-                                            msg_exec = f"✅ Comanda trimisă! ({_pct_exec}% → {_kw_exec} kW)"
-                                            if _skipped_exec:
-                                                msg_exec += f" | Sărite: {', '.join(_skipped_exec)}"
-                                            st.success(msg_exec)
-                                            st.rerun()
+                                            plants_exec = _json.loads(plants_exec)
+                                        _sb3.table("curtail_commands").insert({
+                                            "action": j.get("action_start", "curtail"),
+                                            "plants": plants_exec,
+                                            "kw":     float(j.get("kw", 0)),
+                                            "status": "pending",
+                                        }).execute()
+                                        _sb3.table("curtail_schedule").update({
+                                            "status": "active",
+                                            "actual_start": _dt.now(_tz.utc).isoformat(),
+                                        }).eq("id", j["id"]).execute()
+                                        st.success("✅ Comanda trimisă!")
+                                        st.rerun()
                                     except Exception as e:
                                         st.error(f"Eroare: {e}")
 
