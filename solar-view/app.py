@@ -643,7 +643,7 @@ hr { border-color: #1e2330 !important; }
 
 /* ── Caption / small text ── */
 .stCaption, [data-testid="stCaptionContainer"] {
-    color: #a0a8c0 !important;
+    color: #c8ccd8 !important;
     font-size: 12px !important;
 }
 
