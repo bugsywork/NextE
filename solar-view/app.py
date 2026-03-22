@@ -72,7 +72,10 @@ def render_contact_info(plant_name, contacts):
     if info.get("contact_om"):
         contacts_parts.append(f"🛠 {info['contact_om']} {info.get('tel_om', '')}")
     if contacts_parts:
-        st.caption(" | ".join(contacts_parts))
+        st.markdown(
+            f'<span style="color:#ffffff;font-size:12px">{" | ".join(contacts_parts)}</span>',
+            unsafe_allow_html=True
+        )
 
 
 # Supabase Configuration - Read from Streamlit Secrets
