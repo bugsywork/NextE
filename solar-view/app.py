@@ -736,7 +736,7 @@ hr { border-color: #1e2330 !important; }
             )
         elif data_age_minutes > 2:
             st.warning(
-                f"⚠️ Date de **{data_age_minutes:.0f} minute** — colectorul de date poate fi lent."
+                f"⚠️ Data is **{data_age_minutes:.0f} minutes** old — data collector may be slow."
             )
 
         # Dynamic browser title
@@ -1378,7 +1378,7 @@ hr { border-color: #1e2330 !important; }
                                 st.rerun()
 
             # ---- Command History ----
-            st.markdown("#### 📋 Istoric comenzi (ultimele 10)")
+            st.markdown("#### 📋 Command history (last 10)")
             history = get_curtail_history()
             if history:
                 for cmd in history:
@@ -1471,7 +1471,7 @@ hr { border-color: #1e2330 !important; }
                         .execute()
                     return r.data or []
                 except Exception as e:
-                    st.error(f"Eroare incarcare schedule: {e}")
+                    st.error(f"Error loading schedule: {e}")
                     return []
 
             def _status_badge(status):
@@ -1649,7 +1649,7 @@ hr { border-color: #1e2330 !important; }
                                 if st.button("❌ Cancel", key=f"cancel_{j['id']}"):
                                     try:
                                         _sb3.table("curtail_schedule").update({"status": "cancelled"}).eq("id", j["id"]).execute()
-                                        st.success("Anulat!")
+                                        st.success("Cancelled!")
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Error: {e}")
@@ -1776,7 +1776,7 @@ hr { border-color: #1e2330 !important; }
                         timeout=15,
                     )
                     if _send_resp.status_code == 202:
-                        return True, "Email trimis!"
+                        return True, "Email sent!"
                     return False, f"Graph API ({_send_resp.status_code}): {_send_resp.text[:200]}"
                 except Exception as e:
                     return False, str(e)
@@ -2069,16 +2069,16 @@ hr { border-color: #1e2330 !important; }
                     fill="tozeroy", fillcolor="rgba(255,165,0,0.12)"
                 ))
                 fig.add_trace(go.Scatter(
-                    x=dates, y=eolian_vals, name="💨 Eolian (MW)",
+                    x=dates, y=eolian_vals, name="💨 Wind (MW)",
                     line=dict(color="#00BFFF", width=1.5),
                     fill="tozeroy", fillcolor="rgba(0,191,255,0.08)"
                 ))
                 fig.add_trace(go.Scatter(
-                    x=dates, y=ceruta_vals, name="⚡ Consum (MW)",
+                    x=dates, y=ceruta_vals, name="⚡ Consumption (MW)",
                     line=dict(color="#aaaaaa", width=1.5, dash="dot")
                 ))
                 fig.add_trace(go.Scatter(
-                    x=dates, y=sold_vals, name="📤 Sold (MW)",
+                    x=dates, y=sold_vals, name="📤 Balance (MW)",
                     line=dict(color="#FF6B6B", width=1.5),
                     yaxis="y2"
                 ))
@@ -2089,7 +2089,7 @@ hr { border-color: #1e2330 !important; }
                     legend=dict(orientation="h", y=-0.25),
                     yaxis=dict(title="MW production / consumption"),
                     yaxis2=dict(
-                        title="Sold (MW)",
+                        title="Balance (MW)",
                         overlaying="y", side="right",
                         showgrid=False,
                         zeroline=True, zerolinecolor="rgba(255,107,107,0.3)"
@@ -2112,7 +2112,7 @@ hr { border-color: #1e2330 !important; }
             ("☢️ Nuclear",      nuclear,      "#9B59B6"),
             ("🔥 Hydrocarbons",  hidrocarburi, "#E67E22"),
             ("☀️ Solar",        fotovolt,     "#FFA500"),
-            ("💨 Eolian",       eolian,       "#00BFFF"),
+            ("💨 Wind",          eolian,       "#00BFFF"),
             ("⬛ Coal",         carbune,      "#7F8C8D"),
         ]
         total_prod = putere_debitata if putere_debitata > 0 else 1
@@ -2174,16 +2174,16 @@ hr { border-color: #1e2330 !important; }
                         fill="tozeroy", fillcolor="rgba(255,165,0,0.15)"
                     ))
                     fig2.add_trace(go.Scatter(
-                        x=h_dates, y=h_eolian, name="💨 Eolian",
+                        x=h_dates, y=h_eolian, name="💨 Wind",
                         line=dict(color="#00BFFF", width=1.5),
                         fill="tozeroy", fillcolor="rgba(0,191,255,0.08)"
                     ))
                     fig2.add_trace(go.Scatter(
-                        x=h_dates, y=h_ceruta, name="⚡ Consum",
+                        x=h_dates, y=h_ceruta, name="⚡ Consumption",
                         line=dict(color="#aaaaaa", width=1.5, dash="dot")
                     ))
                     fig2.add_trace(go.Scatter(
-                        x=h_dates, y=h_sold, name="📤 Sold",
+                        x=h_dates, y=h_sold, name="📤 Balance",
                         line=dict(color="#FF6B6B", width=1.5),
                         yaxis="y2"
                     ))
@@ -2191,7 +2191,7 @@ hr { border-color: #1e2330 !important; }
                         height=400, margin=dict(t=20, b=40, l=60, r=60),
                         legend=dict(orientation="h", y=-0.25),
                         yaxis=dict(title="MW"),
-                        yaxis2=dict(title="Sold (MW)", overlaying="y", side="right", showgrid=False),
+                        yaxis2=dict(title="Balance (MW)", overlaying="y", side="right", showgrid=False),
                         hovermode="x unified",
                         plot_bgcolor="rgba(0,0,0,0)",
                         paper_bgcolor="rgba(0,0,0,0)",
