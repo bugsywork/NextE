@@ -373,9 +373,10 @@ PLANTS_METHOD = {
 }
 
 # kw_max per planta — copie din inverter_config.py
-# Folosit pentru restore (trimite kw_max la invertor) si curtail procentual smartlogger
+# Folosit pentru restore (trimite kw_max la invertor) si curtail procentual
+# Trebuie mentinut sincron cu inverter_config.py
 INVERTER_KW_MAX = {
-    "Albesti":                 838.0,   # shared — are si INVERTER_SETS mai jos
+    "Albesti":                 838.0,
     "CEF ECORAY":              1979.0,
     "CEF GIULIA SOLAR":        2000.0,
     "FULVA 3125KW":            3020.0,
@@ -386,18 +387,9 @@ INVERTER_KW_MAX = {
     "TopAgro_PV+BESS":         770.0,
     "RES_ENERGY_PVPP":         2400.0,
     "Luxus_Energy_PVPP":       2925.0,
-}
-
-# kw_per_inverter pentru shared plants — copie din inverter_config.py sets[0]
-# Folosit de pct_to_kw_app pentru curtailment procentual shared
-INVERTER_CONFIG = {
-    "Ro_Ulmu_Fase2":          {"sets": [{"kw_per_inverter": 215.0}]},
-    "Albesti":                {"sets": [{"kw_per_inverter": 125.0}, {"kw_per_inverter": 44.0}]},
-    "Skipass":                {"sets": [{"kw_per_inverter": 110.0}]},
-    "Preferato":              {"sets": [{"kw_per_inverter": 215.0}]},
-    "Raimondenergy 1MW":      {"sets": [{"kw_per_inverter": 89.0}]},
-    "CEF KBO Sibiciu de sus": {"sets": [{"kw_per_inverter": 110.0}]},
-    "CEF Domnesti":           {"sets": [{"kw_per_inverter": 307.0}]},
+    # Shared fara kw_max — restore foloseste kw_per_inverter din sets, nu kw_max
+    # Ro_Ulmu_Fase2, Skipass, Preferato, Raimondenergy 1MW,
+    # CEF KBO Sibiciu de sus, CEF Domnesti — kw_max None → listener le ignora la restore
 }
 
 
@@ -425,31 +417,21 @@ def pct_to_kw_app(plant: str, pct: float, action: str):
 
     if action == "restore":
         if method == "shared":
-            # Shared restore: listener foloseste kw_per_inverter intern — trimitem placeholder
-            return 0.0
+            # Shared plants: listenerii folosesc kw_per_inverter din INVERTER_CONFIG.sets
+            # Nu avem kw_max global → trimitem None si listenerii stiu ce sa faca
+            # (curtail_listener foloseste kw_per_inverter la restore pentru shared)
+            return None  # listener ignora kw la restore shared, foloseste sets intern
         if kw_max is None:
-            return None  # skip
+            return None  # skip — listener va sari planta
         return float(kw_max)
 
     # curtail
     if pct == 0:
         return 0.1 if method == "shared" else 0.0
 
-    # curtail partial
-    if method == "shared":
-        # Shared: calculeaza din kw_per_inverter (primul set ca referinta)
-        inv = INVERTER_CONFIG.get(plant, {})
-        sets = inv.get("sets", [])
-        if not sets:
-            return None  # skip — nu stim kw_per_inverter
-        kw_per_inv = float(sets[0].get("kw_per_inverter", 0))
-        if kw_per_inv == 0:
-            return None
-        return round(kw_per_inv * pct / 100, 1)
-
-    # smartlogger / station_logger
+    # curtail partial (pct > 0)
     if kw_max is None:
-        return None  # skip
+        return None  # skip — nu stim kw_max
     return round(float(kw_max) * pct / 100, 1)
 
 
