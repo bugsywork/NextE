@@ -383,7 +383,7 @@ INVERTER_KW_MAX = {
     "KEK HAL 2100KW":          2100.0,
     "Parc Fotovoltaic Codlea": 2000.0,
     "RAAL_PB_7.371MWp_6.02MW": 5600.0,
-    "SunlightGreen":           1600.0,
+    "SunlightGreen":           1607.0,
     "TopAgro_PV+BESS":         770.0,
     "RES_ENERGY_PVPP":         2400.0,
     "Luxus_Energy_PVPP":       2925.0,
