@@ -346,7 +346,7 @@ ALL_PLANTS = [
     "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
     "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
     "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
-    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon", "En-Prest"
+    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
 ]
 
 # Metoda per planta — copie din schedule_executor.py / curtail_listener_v3.py
@@ -370,7 +370,6 @@ PLANTS_METHOD = {
     "RES_ENERGY_PVPP":         "smartlogger",
     "Luxus_Energy_PVPP":       "station_logger",
     "Trecon":                  "trecon",
-    "En-Prest":                "shared",
 }
 
 # kw_max per planta — copie din inverter_config.py
@@ -399,7 +398,6 @@ INVERTER_CONFIG = {
     "Raimondenergy 1MW":      {"sets": [{"kw_per_inverter": 89.0}]},
     "CEF KBO Sibiciu de sus": {"sets": [{"kw_per_inverter": 110.0}]},
     "CEF Domnesti":           {"sets": [{"kw_per_inverter": 307.0}]},
-    "En-Prest":               {"sets": [{"kw_per_inverter": 330.0}]},
 }
 
 
