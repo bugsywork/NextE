@@ -1187,8 +1187,8 @@ hr { border-color: #1e2330 !important; }
                             skipped.append(plant)
                             continue
                         valid_plants.append(plant)
-                        # kw_send = valoarea non-Trecon, non-shared (shared calculeaza intern)
-                        if PLANTS_METHOD.get(plant) not in ("trecon", "shared") and kw_send == 0.0 and kw_val > 0:
+                        # kw_send = valoarea non-Trecon (Trecon are listener propriu)
+                        if PLANTS_METHOD.get(plant) != "trecon" and kw_send == 0.0 and kw_val > 0:
                             kw_send = kw_val
 
                     if not valid_plants:
@@ -1694,7 +1694,7 @@ hr { border-color: #1e2330 !important; }
                                                 _skipped_exec.append(_p)
                                                 continue
                                             _valid_exec.append(_p)
-                                            if PLANTS_METHOD.get(_p) not in ("trecon", "shared") and _kw_exec == 0.0 and _kv > 0:
+                                            if PLANTS_METHOD.get(_p) != "trecon" and _kw_exec == 0.0 and _kv > 0:
                                                 _kw_exec = _kv
                                         if not _valid_exec:
                                             st.error("❌ No valid plants — kw_max undefined for all.")
@@ -1720,52 +1720,6 @@ hr { border-color: #1e2330 !important; }
                                             if _skipped_exec:
                                                 msg_exec += f" | Skipped: {', '.join(_skipped_exec)}"
                                             st.success(msg_exec)
-                                            st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error: {e}")
-
-                            # Restore Now — disponibil pentru joburi active
-                            if j.get("status") == "active":
-                                if st.button("🟢 Restore Now", key=f"restore_now_{j['id']}", type="primary"):
-                                    try:
-                                        plants_rest = j.get("plants") or [j.get("plant_name")]
-                                        if isinstance(plants_rest, str):
-                                            try:
-                                                plants_rest = _json.loads(plants_rest)
-                                            except Exception:
-                                                plants_rest = [plants_rest]
-                                        _valid_rest = []
-                                        _kw_rest = 0.0
-                                        _skipped_rest = []
-                                        for _p in plants_rest:
-                                            _kv = pct_to_kw_app(_p, 100.0, "restore")
-                                            if _kv is None:
-                                                _skipped_rest.append(_p)
-                                                continue
-                                            _valid_rest.append(_p)
-                                            if PLANTS_METHOD.get(_p) not in ("trecon", "shared") and _kw_rest == 0.0 and _kv > 0:
-                                                _kw_rest = _kv
-                                        if not _valid_rest:
-                                            st.error("❌ No valid plants.")
-                                        else:
-                                            import uuid as _uuid_rest
-                                            _sb_rest = create_client(SUPABASE_URL, SUPABASE_KEY)
-                                            _sb_rest.table("curtail_commands").insert({
-                                                "action":       "restore",
-                                                "plants":       _valid_rest,
-                                                "kw":           _kw_rest,
-                                                "status":       "pending",
-                                                "created_at":   _dt.now(_tz.utc).isoformat(),
-                                                "command_uid":  str(_uuid_rest.uuid4()),
-                                                "created_by":   st.session_state.get("curtail_auth_user", "unknown"),
-                                                "pct_setpoint": 100.0,
-                                                "skipped_plants": _skipped_rest or None,
-                                            }).execute()
-                                            _sb_rest.table("curtail_schedule").update({
-                                                "status":     "completed",
-                                                "actual_stop": _dt.now(_tz.utc).isoformat(),
-                                            }).eq("id", j["id"]).execute()
-                                            st.success(f"✅ Restore command sent! ({len(_valid_rest)} plants)")
                                             st.rerun()
                                     except Exception as e:
                                         st.error(f"Error: {e}")
