@@ -13,7 +13,6 @@ import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 from zoneinfo import ZoneInfo
 import requests
-import urllib.parse
 import xml.etree.ElementTree as ET
 
 try:
@@ -1797,10 +1796,9 @@ hr { border-color: #1e2330 !important; }
                             signature = row.get("body", "")
                         else:
                             templates[row["name"]] = {
-                                "subject":       row.get("subject", ""),
-                                "body":          row.get("body", ""),
-                                "whatsapp_body": row.get("whatsapp_body") or "",
-                                "id":            row.get("id"),
+                                "subject": row.get("subject", ""),
+                                "body":    row.get("body", ""),
+                                "id":      row.get("id"),
                             }
                     return templates, signature
                 except Exception as e:
@@ -1848,18 +1846,6 @@ hr { border-color: #1e2330 !important; }
                     return False, f"Graph API ({_send_resp.status_code}): {_send_resp.text[:200]}"
                 except Exception as e:
                     return False, str(e)
-
-            def build_whatsapp_url(phone, text):
-                """Construieste URL wa.me cu textul URL-encoded.
-                phone: format international FARA + (ex: '40712345678')
-                text: text liber, cu diacritice OK"""
-                if not phone:
-                    return None
-                phone_clean = ''.join(c for c in str(phone) if c.isdigit())
-                if not phone_clean:
-                    return None
-                text_encoded = urllib.parse.quote(text or "")
-                return f"https://wa.me/{phone_clean}?text={text_encoded}"
 
             # ── Reload + Load ────────────────────────────────────────────────────
             col_r, _ = st.columns([1, 5])
@@ -1918,34 +1904,14 @@ hr { border-color: #1e2330 !important; }
                             subject = tpl["subject"]
                             body    = tpl["body"]
                         full_body = body + ("\n\n" + SIGNATURE if SIGNATURE else "")
-
-                        # ── WhatsApp text + URL ──
-                        wa_text = ""
-                        wa_body_template = tpl.get("whatsapp_body") or ""
-                        if wa_body_template:
-                            try:
-                                wa_text = wa_body_template.format(
-                                    cef=cef, data=date_str, start=start_str, end=end_str
-                                )
-                            except KeyError:
-                                wa_text = wa_body_template
-
-                        wa_phone = contact.get("whatsapp_phone", "") or ""
-                        wa_url   = build_whatsapp_url(wa_phone, wa_text)
-                        channel  = contact.get("preferred_channel") or "email"
-
                         emails.append({
                             "cef":      cef,
                             "tpl_name": tpl_name,
-                            "to":       contact.get("to_email", "") or "",
-                            "cc":       contact.get("cc_email", "") or "",
+                            "to":       contact.get("to_email", ""),
+                            "cc":       contact.get("cc_email", ""),
                             "subject":  subject,
                             "body":     full_body,
                             "tpl_id":   tpl.get("id"),
-                            "channel":  channel,
-                            "wa_phone": wa_phone,
-                            "wa_text":  wa_text,
-                            "wa_url":   wa_url,
                         })
 
                     # ── Preview si trimitere per centrala ─────────────────────────
@@ -1955,16 +1921,7 @@ hr { border-color: #1e2330 !important; }
 
                     for em in emails:
                         _k = em["cef"].replace(" ", "_").replace("/", "_")
-
-                        # Iconita + destinatie afisata in titlu, in functie de canal
-                        if em["channel"] == "whatsapp":
-                            icon, dest = "📱", em["wa_phone"] or "(numar lipsa)"
-                        elif em["channel"] == "both":
-                            icon, dest = "📧📱", em["to"]
-                        else:
-                            icon, dest = "📧", em["to"]
-
-                        with st.expander(f"{icon} {em['cef']} → {dest[:40]}{'...' if len(dest) > 40 else ''}", expanded=True):
+                        with st.expander(f"📧 {em['cef']} → {em['to'][:40]}{'...' if len(em['to']) > 40 else ''}", expanded=True):
                             col_l, col_r2 = st.columns([1, 1])
                             with col_l:
                                 # Template override
@@ -1980,89 +1937,45 @@ hr { border-color: #1e2330 !important; }
                                     try:
                                         em["subject"] = tpl2["subject"].format(cef=em["cef"], data=date_str, start=start_str, end=end_str)
                                         em["body"]    = tpl2["body"].format(cef=em["cef"], data=date_str, start=start_str, end=end_str) + ("\n\n" + SIGNATURE if SIGNATURE else "")
-                                        wa_body_new   = tpl2.get("whatsapp_body") or ""
-                                        if wa_body_new:
-                                            em["wa_text"] = wa_body_new.format(cef=em["cef"], data=date_str, start=start_str, end=end_str)
-                                            em["wa_url"]  = build_whatsapp_url(em["wa_phone"], em["wa_text"])
                                     except KeyError:
                                         em["subject"] = tpl2["subject"]
                                         em["body"]    = tpl2["body"]
 
-                                # Campuri vizibile in functie de canal
-                                if em["channel"] in ("email", "both"):
-                                    to_val   = st.text_input("To",      value=em["to"],      key=f"to_{_k}")
-                                    cc_val   = st.text_input("CC",      value=em["cc"],      key=f"cc_{_k}")
-                                    subj_val = st.text_input("Subject", value=em["subject"], key=f"subj_{_k}")
-                                else:
-                                    to_val = cc_val = subj_val = ""
-
-                                if em["channel"] in ("whatsapp", "both"):
-                                    st.text_input("WhatsApp phone", value=em["wa_phone"], key=f"wa_phone_{_k}", disabled=True)
+                                to_val = st.text_input("To",  value=em["to"], key=f"to_{_k}")
+                                cc_val = st.text_input("CC",  value=em["cc"], key=f"cc_{_k}")
+                                subj_val = st.text_input("Subject", value=em["subject"], key=f"subj_{_k}")
 
                             with col_r2:
-                                if em["channel"] in ("email", "both"):
-                                    st.markdown("**Preview email:**")
-                                    st.text(em["body"][:600] + ("..." if len(em["body"]) > 600 else ""))
-                                if em["channel"] in ("whatsapp", "both"):
-                                    st.markdown("**Preview WhatsApp:**")
-                                    st.text(em["wa_text"][:400] + ("..." if len(em["wa_text"]) > 400 else "") if em["wa_text"] else "(template fara whatsapp_body)")
+                                st.markdown("**Preview body:**")
+                                st.text(em["body"][:800] + ("..." if len(em["body"]) > 800 else ""))
 
-                            # Butoane pe rand separat (sub coloane), in functie de canal
-                            btn_cols = st.columns(3)
-
-                            if em["channel"] in ("email", "both"):
-                                with btn_cols[0]:
-                                    if st.button(f"📤 Send Email", key=f"send_{_k}"):
-                                        with st.spinner("Sending..."):
-                                            ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
-                                        send_results[em["cef"]] = (ok, msg)
-                                        if ok:
-                                            st.success(f"✅ {msg}")
-                                        else:
-                                            st.error(f"❌ {msg}")
-
-                            if em["channel"] in ("whatsapp", "both"):
-                                with btn_cols[1]:
-                                    if em["wa_url"]:
-                                        st.link_button("📱 Open WhatsApp", em["wa_url"])
-                                    else:
-                                        st.warning("⚠️ Numar lipsa sau text gol")
-                                with btn_cols[2]:
-                                    if em["wa_text"]:
-                                        if st.button(f"📋 Show text", key=f"copy_{_k}"):
-                                            st.code(em["wa_text"], language=None)
-                                            st.caption("↑ selecteaza si copiaza (Ctrl+C)")
+                            if st.button(f"📤 Send to {em['cef']}", key=f"send_{_k}"):
+                                with st.spinner("Sending..."):
+                                    ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
+                                send_results[em["cef"]] = (ok, msg)
+                                if ok:
+                                    st.success(f"✅ {msg}")
+                                else:
+                                    st.error(f"❌ {msg}")
 
                     # ── Trimite toate ─────────────────────────────────────────────
                     st.markdown("---")
-
-                    emails_only = [em for em in emails if em["channel"] in ("email", "both")]
-                    wa_only     = [em for em in emails if em["channel"] in ("whatsapp", "both") and em["wa_url"]]
-
-                    if emails_only:
-                        if st.button(f"📤 Send ALL emails ({len(emails_only)})", type="primary", key="send_all"):
-                            all_ok = True
-                            for em in emails_only:
-                                _k = em["cef"].replace(" ", "_").replace("/", "_")
-                                to_val   = st.session_state.get(f"to_{_k}",   em["to"])
-                                cc_val   = st.session_state.get(f"cc_{_k}",   em["cc"])
-                                subj_val = st.session_state.get(f"subj_{_k}", em["subject"])
-                                with st.spinner(f"Sending to {em['cef']}..."):
-                                    ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
-                                if ok:
-                                    st.success(f"✅ {em['cef']}: {msg}")
-                                else:
-                                    st.error(f"❌ {em['cef']}: {msg}")
-                                    all_ok = False
-                            if all_ok:
-                                st.balloons()
-
-                    if wa_only:
-                        st.markdown(f"**📱 {len(wa_only)} WhatsApp link(s) — apasa fiecare ca sa deschizi:**")
-                        wa_link_cols = st.columns(min(len(wa_only), 3))
-                        for idx, em in enumerate(wa_only):
-                            with wa_link_cols[idx % len(wa_link_cols)]:
-                                st.link_button(f"📱 {em['cef'][:25]}", em["wa_url"])
+                    if st.button("📤 Send ALL emails", type="primary", key="send_all"):
+                        all_ok = True
+                        for em in emails:
+                            _k = em["cef"].replace(" ", "_").replace("/", "_")
+                            to_val   = st.session_state.get(f"to_{_k}",   em["to"])
+                            cc_val   = st.session_state.get(f"cc_{_k}",   em["cc"])
+                            subj_val = st.session_state.get(f"subj_{_k}", em["subject"])
+                            with st.spinner(f"Sending to {em['cef']}..."):
+                                ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
+                            if ok:
+                                st.success(f"✅ {em['cef']}: {msg}")
+                            else:
+                                st.error(f"❌ {em['cef']}: {msg}")
+                                all_ok = False
+                        if all_ok:
+                            st.balloons()
 
                 # ── Editor template (expandabil) ──────────────────────────────────
                 st.markdown("---")

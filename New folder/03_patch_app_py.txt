@@ -1,0 +1,221 @@
+################################################################################
+# PATCH app.py — adaugare buton WhatsApp in Tab 4
+# Data: 2026-04-28
+#
+# CONTEXT:
+#   - Tab 4 trimite mailuri prin Graph API (functioneaza deja)
+#   - Adaugare canal WhatsApp via wa.me link (zero infrastructura, zero cost)
+#   - Backwards-compatible: parcurile fara whatsapp_phone raman pe email
+#
+# PASI:
+#   1. Backup: cp ~/master/app.py ~/master/app.py.bak_20260428
+#   2. Aplica modificarile DE MAI JOS, in ordine
+#   3. Restart Commander
+#   4. Test cu un parc dummy ('whatsapp_phone' = numarul tau personal)
+################################################################################
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MODIFICARE 1: Import urllib.parse (pentru URL encoding diacritice)
+# Locatie: la inceputul fisierului, langa celelalte import-uri
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ADAUGA aceasta linie undeva la inceputul app.py (zona de import):
+import urllib.parse
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MODIFICARE 2: Helper-ul build_whatsapp_url
+# Locatie: oriunde inainte de Tab 4 (ex: dupa send_graph_email, linia ~1849)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ADAUGA aceasta functie helper:
+
+def build_whatsapp_url(phone, text):
+    """
+    Construieste URL wa.me cu textul URL-encoded.
+    phone: format international FARA + (ex: '40712345678')
+    text: text liber, inclusiv diacritice
+    Returns: 'https://wa.me/40712345678?text=...'
+    """
+    if not phone:
+        return None
+    # Curata numarul: doar cifre
+    phone_clean = ''.join(c for c in str(phone) if c.isdigit())
+    if not phone_clean:
+        return None
+    # Encode text (cu diacritice)
+    text_encoded = urllib.parse.quote(text or "")
+    return f"https://wa.me/{phone_clean}?text={text_encoded}"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MODIFICARE 3: Constructia mesajelor — adauga whatsapp_body si whatsapp_url
+# Locatie: linia ~1907 (in bucla `for cef in selected_cefs`)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# INLOCUIESTE blocul de la linia 1907 (emails.append) cu acesta:
+
+                        # Construieste si textul WhatsApp daca exista
+                        wa_text = ""
+                        wa_body_template = tpl.get("whatsapp_body") or ""
+                        if wa_body_template:
+                            try:
+                                wa_text = wa_body_template.format(
+                                    cef=cef, data=date_str, start=start_str, end=end_str
+                                )
+                            except KeyError:
+                                wa_text = wa_body_template
+
+                        wa_phone = contact.get("whatsapp_phone", "")
+                        wa_url   = build_whatsapp_url(wa_phone, wa_text)
+                        channel  = contact.get("preferred_channel") or "email"
+
+                        emails.append({
+                            "cef":      cef,
+                            "tpl_name": tpl_name,
+                            "to":       contact.get("to_email", "") or "",
+                            "cc":       contact.get("cc_email", "") or "",
+                            "subject":  subject,
+                            "body":     full_body,
+                            "tpl_id":   tpl.get("id"),
+                            # ── NOU pentru WhatsApp ──
+                            "channel":  channel,
+                            "wa_phone": wa_phone or "",
+                            "wa_text":  wa_text,
+                            "wa_url":   wa_url,
+                        })
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MODIFICARE 4: Afisarea per parc — buton conditional in functie de canal
+# Locatie: linia ~1922 (bucla `for em in emails`)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# INLOCUIESTE intregul bloc `for em in emails:` (liniile 1922-1959) cu:
+
+                    for em in emails:
+                        _k = em["cef"].replace(" ", "_").replace("/", "_")
+
+                        # Iconita in functie de canal
+                        if em["channel"] == "whatsapp":
+                            icon, dest = "📱", em["wa_phone"]
+                        elif em["channel"] == "both":
+                            icon, dest = "📧📱", em["to"]
+                        else:
+                            icon, dest = "📧", em["to"]
+
+                        with st.expander(f"{icon} {em['cef']} → {dest[:40]}{'...' if len(dest) > 40 else ''}", expanded=True):
+                            col_l, col_r2 = st.columns([1, 1])
+
+                            with col_l:
+                                # Template override (la fel ca inainte)
+                                tpl_override = st.selectbox(
+                                    "Template",
+                                    options=list(TEMPLATES_DB.keys()),
+                                    index=list(TEMPLATES_DB.keys()).index(em["tpl_name"]) if em["tpl_name"] in TEMPLATES_DB else 0,
+                                    key=f"tpl_{_k}"
+                                )
+                                # Recalculeaza daca s-a schimbat template-ul
+                                if tpl_override != em["tpl_name"]:
+                                    tpl2 = TEMPLATES_DB[tpl_override]
+                                    try:
+                                        em["subject"] = tpl2["subject"].format(cef=em["cef"], data=date_str, start=start_str, end=end_str)
+                                        em["body"]    = tpl2["body"].format(cef=em["cef"], data=date_str, start=start_str, end=end_str) + ("\n\n" + SIGNATURE if SIGNATURE else "")
+                                        wa_body_new   = tpl2.get("whatsapp_body") or ""
+                                        if wa_body_new:
+                                            em["wa_text"] = wa_body_new.format(cef=em["cef"], data=date_str, start=start_str, end=end_str)
+                                            em["wa_url"]  = build_whatsapp_url(em["wa_phone"], em["wa_text"])
+                                    except KeyError:
+                                        em["subject"] = tpl2["subject"]
+                                        em["body"]    = tpl2["body"]
+
+                                # Campuri vizibile in functie de canal
+                                if em["channel"] in ("email", "both"):
+                                    to_val   = st.text_input("To",      value=em["to"], key=f"to_{_k}")
+                                    cc_val   = st.text_input("CC",      value=em["cc"], key=f"cc_{_k}")
+                                    subj_val = st.text_input("Subject", value=em["subject"], key=f"subj_{_k}")
+                                else:
+                                    to_val = cc_val = subj_val = ""  # nu se foloseste
+
+                                if em["channel"] in ("whatsapp", "both"):
+                                    st.text_input("WhatsApp phone", value=em["wa_phone"], key=f"wa_phone_{_k}", disabled=True)
+
+                            with col_r2:
+                                if em["channel"] in ("email", "both"):
+                                    st.markdown("**Preview email:**")
+                                    st.text(em["body"][:600] + ("..." if len(em["body"]) > 600 else ""))
+                                if em["channel"] in ("whatsapp", "both"):
+                                    st.markdown("**Preview WhatsApp:**")
+                                    st.text(em["wa_text"][:400] + ("..." if len(em["wa_text"]) > 400 else ""))
+
+                            # Butoane in functie de canal
+                            btn_col1, btn_col2, btn_col3 = st.columns(3)
+
+                            if em["channel"] in ("email", "both"):
+                                with btn_col1:
+                                    if st.button(f"📤 Send Email", key=f"send_{_k}"):
+                                        with st.spinner("Sending..."):
+                                            ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
+                                        if ok:
+                                            st.success(f"✅ {msg}")
+                                        else:
+                                            st.error(f"❌ {msg}")
+
+                            if em["channel"] in ("whatsapp", "both"):
+                                with btn_col2:
+                                    if em["wa_url"]:
+                                        st.link_button("📱 Open WhatsApp", em["wa_url"])
+                                    else:
+                                        st.warning("⚠️ Numar telefon lipsa")
+                                with btn_col3:
+                                    if em["wa_text"]:
+                                        # Buton care copiaza textul in clipboard via st.code
+                                        if st.button(f"📋 Copy text", key=f"copy_{_k}"):
+                                            st.code(em["wa_text"], language=None)
+                                            st.info("Text afisat mai sus — selecteaza si copiaza (Ctrl+C)")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MODIFICARE 5: Butonul "Send ALL" — separa email de WhatsApp
+# Locatie: linia ~1963 (bucla `if st.button("Send ALL emails")`)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# INLOCUIESTE blocul "Send ALL emails" cu:
+
+                    # ── Trimite toate ─────────────────────────────────────────
+                    st.markdown("---")
+
+                    btn_all_email, btn_all_wa = st.columns(2)
+
+                    with btn_all_email:
+                        emails_to_send = [em for em in emails if em["channel"] in ("email", "both")]
+                        if emails_to_send:
+                            if st.button(f"📤 Send ALL emails ({len(emails_to_send)})", type="primary", key="send_all_email"):
+                                all_ok = True
+                                for em in emails_to_send:
+                                    _k = em["cef"].replace(" ", "_").replace("/", "_")
+                                    to_val   = st.session_state.get(f"to_{_k}",   em["to"])
+                                    cc_val   = st.session_state.get(f"cc_{_k}",   em["cc"])
+                                    subj_val = st.session_state.get(f"subj_{_k}", em["subject"])
+                                    with st.spinner(f"Sending email to {em['cef']}..."):
+                                        ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
+                                    if ok:
+                                        st.success(f"✅ {em['cef']}: {msg}")
+                                    else:
+                                        st.error(f"❌ {em['cef']}: {msg}")
+                                        all_ok = False
+                                if all_ok:
+                                    st.balloons()
+
+                    with btn_all_wa:
+                        wa_to_open = [em for em in emails if em["channel"] in ("whatsapp", "both") and em["wa_url"]]
+                        if wa_to_open:
+                            st.markdown(f"**📱 {len(wa_to_open)} WhatsApp link(s):**")
+                            for em in wa_to_open:
+                                st.link_button(f"📱 {em['cef']}", em["wa_url"])
+
+
+################################################################################
+# SFARSIT PATCH
+################################################################################
