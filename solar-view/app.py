@@ -1859,7 +1859,7 @@ hr { border-color: #1e2330 !important; }
                 if not phone_clean:
                     return None
                 text_encoded = urllib.parse.quote(text or "")
-                return f"https://wa.me/{phone_clean}?text={text_encoded}"
+                return f"https://web.whatsapp.com/send?phone={phone_clean}&text={text_encoded}"
 
             # ── Reload + Load ────────────────────────────────────────────────────
             col_r, _ = st.columns([1, 5])
