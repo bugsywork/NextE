@@ -219,176 +219,6 @@ def count_severity(plants_list, severity):
 
 
 # ============================================================================
-# NBI LIVE STATUS (Huawei NorthBound API → Supabase nbi_plant_status)
-# ============================================================================
-
-@st.cache_data(ttl=60)  # Cache 60s; data is refreshed every 3min on VM
-def get_nbi_status_from_supabase():
-    """
-    Fetch NBI live status (active power + inverter health) from nbi_plant_status.
-    Worker on VM (nbi_status_collector.py) writes here every 3 min.
-    Returns: (rows, latest_update, error)
-    """
-    if not SUPABASE_AVAILABLE:
-        return [], None, "Supabase not available"
-    try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        result = supabase.table('nbi_plant_status')\
-            .select('*')\
-            .order('active_power_kw', desc=True)\
-            .execute()
-        if not result.data:
-            return [], None, "No NBI data yet (worker not started?)"
-        # Latest update = max updated_at across all rows
-        latest = max(r['updated_at'] for r in result.data)
-        return result.data, latest, None
-    except Exception as e:
-        return [], None, f"NBI fetch error: {str(e)[:120]}"
-
-
-def _nbi_status_color(overall: str) -> str:
-    """overall → CSS color for left border."""
-    return {
-        'ok':      '#1D9E75',  # green
-        'warning': '#BA7517',  # amber
-        'fault':   '#E24B4A',  # red
-        'no_data': '#888780',  # gray
-    }.get(overall, '#888780')
-
-
-def _nbi_status_emoji(overall: str) -> str:
-    return {'ok': '🟢', 'warning': '🟡', 'fault': '🔴', 'no_data': '⚪'}.get(overall, '⚪')
-
-
-def render_nbi_status_tab(tab):
-    """Render the NBI Live Status tab with cards per plant."""
-    with tab:
-        rows, latest_update, error = get_nbi_status_from_supabase()
-
-        if error:
-            st.error(f"❌ {error}")
-            st.info("💡 Worker `nbi_status_collector.py` trebuie să ruleze pe VM (manual sau systemd timer).")
-            return
-
-        if not rows:
-            st.warning("⚠️ Nu există date NBI încă.")
-            return
-
-        # Header: summary stats
-        total_kw = sum((r.get('active_power_kw') or 0) for r in rows)
-        ok_n = sum(1 for r in rows if r.get('overall') == 'ok')
-        warn_n = sum(1 for r in rows if r.get('overall') == 'warning')
-        fault_n = sum(1 for r in rows if r.get('overall') == 'fault')
-
-        # Calculate age of data
-        try:
-            latest_dt = datetime.fromisoformat(latest_update.replace('Z', '+00:00'))
-            now_utc = datetime.now(ZoneInfo('UTC'))
-            age_sec = (now_utc - latest_dt).total_seconds()
-            local_time = latest_dt.astimezone(ZoneInfo('Europe/Bucharest'))
-            age_str = f"{int(age_sec // 60)}m {int(age_sec % 60)}s ago"
-            time_str = local_time.strftime('%H:%M:%S')
-        except Exception:
-            age_str = "?"
-            time_str = "?"
-
-        # Header row
-        col_h1, col_h2, col_h3, col_h4, col_h5 = st.columns([3, 1, 1, 1, 1])
-        with col_h1:
-            st.markdown(f"### 🔌 NBI Live — {len(rows)} plante · **{total_kw:,.0f} kW** total")
-            st.caption(f"Last update: {time_str} ({age_str}) · auto-refresh la 3 min pe VM")
-        with col_h2:
-            st.metric("🟢 OK", ok_n)
-        with col_h3:
-            st.metric("🟡 Warn", warn_n)
-        with col_h4:
-            st.metric("🔴 Fault", fault_n)
-        with col_h5:
-            if st.button("🔄 Refresh", key="nbi_refresh"):
-                st.cache_data.clear()
-                st.rerun()
-
-        st.divider()
-
-        # Cards grid: 3 columns
-        cols = st.columns(3)
-        for idx, row in enumerate(rows):
-            col = cols[idx % 3]
-            with col:
-                _render_nbi_card(row)
-
-
-def _render_nbi_card(row: dict):
-    """Render one plant card."""
-    plant_name = row.get('plant_name', '?')
-    overall = row.get('overall', 'no_data')
-    ap_kw = row.get('active_power_kw')
-    inv_total = row.get('inv_total', 0) or 0
-    inv_ok = row.get('inv_ok', 0) or 0
-    inv_standby = row.get('inv_standby', 0) or 0
-    inv_fault = row.get('inv_fault', 0) or 0
-    fault_details = row.get('fault_details') or []
-    err = row.get('error')
-
-    color = _nbi_status_color(overall)
-    emoji = _nbi_status_emoji(overall)
-
-    ap_display = f"{ap_kw:,.0f} kW" if ap_kw is not None else "— kW"
-
-    # Inverter line
-    parts = []
-    if inv_ok:
-        parts.append(f"<span style='color:#1D9E75'>{inv_ok} OK</span>")
-    if inv_standby:
-        parts.append(f"<span style='color:#BA7517'>{inv_standby} stb</span>")
-    if inv_fault:
-        parts.append(f"<span style='color:#E24B4A'>{inv_fault} fault</span>")
-    inv_line = " / ".join(parts) if parts else f"<span style='color:#888'>{inv_total} no data</span>"
-
-    # Build card HTML
-    card_html = f"""
-    <div style='
-        background: white;
-        border: 0.5px solid rgba(0,0,0,0.15);
-        border-left: 4px solid {color};
-        border-radius: 0 8px 8px 0;
-        padding: 12px 14px;
-        margin-bottom: 10px;
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    '>
-        <div style='display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px;'>
-            <div style='font-size:13px; font-weight:500; color:#222; line-height:1.3;'>{emoji} {plant_name}</div>
-            <div style='font-size:13px; font-weight:500; color:#222; white-space:nowrap;'>{ap_display}</div>
-        </div>
-        <div style='font-size:11px; color:#666;'>Inverters: {inv_line}</div>
-    """
-
-    # Fault details section (only if any)
-    if fault_details:
-        card_html += "<div style='margin-top:6px;'>"
-        for fd in fault_details[:3]:  # max 3 vizibile per card
-            dev_id = fd.get('dev_id', '?')
-            sn = fd.get('sn', '?')
-            msg = fd.get('message', '?')
-            sn_short = str(sn)[-6:] if sn and sn != '?' else '?'
-            card_html += f"""
-            <div style='background:#FCEBEB; border-radius:4px; padding:4px 6px; margin-top:3px; font-size:10px;'>
-                <span style='color:#A32D2D; font-weight:500;'>Inv {sn_short}</span>
-                <span style='color:#791F1F;'> — {msg}</span>
-            </div>"""
-        if len(fault_details) > 3:
-            card_html += f"<div style='font-size:10px; color:#888; margin-top:3px;'>+ {len(fault_details)-3} more</div>"
-        card_html += "</div>"
-
-    if err:
-        card_html += f"<div style='font-size:10px; color:#A32D2D; margin-top:4px;'>⚠ {err[:60]}</div>"
-
-    card_html += "</div>"
-
-    st.markdown(card_html, unsafe_allow_html=True)
-
-
-# ============================================================================
 # SEN DATA FETCHING (sistemulenergetic.ro)
 # ============================================================================
 
@@ -885,7 +715,7 @@ hr { border-color: #1e2330 !important; }
 </div>
 """, unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🌞 Monitoring", "⚡ Curtailment", "📅 Schedule", "📧 Shutdown Notifications", "📈 Forecast vs Actuals", "🇷🇴 SEN & Market", "🔌 NBI Live"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🌞 Monitoring", "⚡ Curtailment", "📅 Schedule", "📧 Shutdown Notifications", "📈 Forecast vs Actuals", "🇷🇴 SEN & Market"])
 
     # ============================
     # TAB 1: MONITORING (existing)
@@ -2526,10 +2356,6 @@ hr { border-color: #1e2330 !important; }
 
 
     # ============================
-    # TAB 7: NBI LIVE STATUS (Huawei NorthBound API)
-    # ============================
-    render_nbi_status_tab(tab7)
-
 # ============================================================================
 # TAB 5: FORECAST VS ACTUALS
 # ============================================================================
