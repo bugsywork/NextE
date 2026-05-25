@@ -612,7 +612,6 @@ PLANTS_METHOD = {
     "Trecon":                  "trecon",
     "En-Prest":                "shared",
     "CEF Miercurea Ciuc":      "smartlogger",
-    "CEF Dalga":               "goodwe_dalga",
 }
 
 # kw_max per planta — copie din inverter_config.py
