@@ -586,7 +586,7 @@ ALL_PLANTS = [
     "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
     "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
     "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon", "En-Prest",
-    "CEF Miercurea Ciuc", "MI MV Green Energy"
+    "CEF Miercurea Ciuc"
 ]
 
 # Metoda per planta — copie din schedule_executor.py / curtail_listener_v3.py
