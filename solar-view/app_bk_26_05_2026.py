@@ -630,7 +630,7 @@ INVERTER_KW_MAX = {
     "RES_ENERGY_PVPP":         2400.0,
     "Luxus_Energy_PVPP":       2925.0,
     "CEF Miercurea Ciuc":      2970.0,
-    "CEF Dalga":               896.1,
+    "CEF Dalga":               990.0,
 }
 
 # kw_per_inverter pentru shared plants — copie din inverter_config.py sets[0]
