@@ -586,7 +586,7 @@ ALL_PLANTS = [
     "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
     "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
     "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon", "En-Prest",
-    "CEF Miercurea Ciuc", "MI MV Green Energy", "CEF Dalga"
+    "CEF Miercurea Ciuc", "MI MV Green Energy", "CEF Dalga", "CEF Ruseni"
 ]
 
 # Metoda per planta — copie din schedule_executor.py / curtail_listener_v3.py
@@ -613,6 +613,7 @@ PLANTS_METHOD = {
     "En-Prest":                "shared",
     "CEF Miercurea Ciuc":      "smartlogger",
     "CEF Dalga":               "goodwe_dalga",
+    "CEF Ruseni": 	       "growatt",
 }
 
 # kw_max per planta — copie din inverter_config.py
@@ -631,6 +632,7 @@ INVERTER_KW_MAX = {
     "Luxus_Energy_PVPP":       2925.0,
     "CEF Miercurea Ciuc":      2970.0,
     "CEF Dalga":               896.1,
+    "CEF Ruseni":              2000.0,
 }
 
 # kw_per_inverter pentru shared plants — copie din inverter_config.py sets[0]
