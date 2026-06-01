@@ -643,7 +643,6 @@ INVERTER_CONFIG = {
     "Preferato":              {"sets": [{"kw_per_inverter": 215.0}]},
     "Raimondenergy 1MW":      {"sets": [{"kw_per_inverter": 89.0}]},
     "CEF KBO Sibiciu de sus": {"sets": [{"kw_per_inverter": 110.0}]},
-    "CEF Domnesti":           {"sets": [{"kw_per_inverter": 307.0}]},
     "En-Prest":               {"sets": [{"kw_per_inverter": 330.0}]},
 }
 
@@ -2611,7 +2610,6 @@ PARK_MAP = {
     'Albesti': 'Beer_Albesti_PVPP',
     'CEF BEER SOLAR': 'Beer_Baciului_PVPP',
     'CEF Bacova': 'Arothreepower_PVPP',
-    'CEF Domnesti': 'Vertical_Energy_Volt_PVPP',
     'CEF ECORAY': 'Ecorai_Energy_PVPP',
     'CEF GIULIA SOLAR': 'GIULIA_PVPP',
     'CEF KBO Sibiciu de sus': 'KBO_PVPP',
@@ -2650,7 +2648,6 @@ UUID_MAP = {
     'Beer_Albesti_PVPP': '705eeb0b-fc8c-4ac7-9873-9bacdbe39643',
     'Beer_Baciului_PVPP': '432a14d7-eda8-4ef2-8988-e5bc96f9e37a',
     'Arothreepower_PVPP': '50a88b43-28cf-4a76-9172-c91291c6ba0c',
-    'Vertical_Energy_Volt_PVPP': '2ffcc45a-12bb-46db-a448-93fcc4c18efc',
     'Ecorai_Energy_PVPP': 'af7398e8-9846-40a4-ba7d-bd19866fd10c',
     'GIULIA_PVPP': '07019faf-284d-42e7-8ee0-f2064a8dca30',
     'KBO_PVPP': '64fef072-8fc4-4e00-839d-2b4e4d5cbc46',
