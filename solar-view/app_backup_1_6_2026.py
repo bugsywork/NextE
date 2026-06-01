@@ -584,7 +584,7 @@ ALL_PLANTS = [
     "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
     "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
     "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
-    "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
+    "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
     "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon", "En-Prest",
     "CEF Miercurea Ciuc", "ML MV Green Energy", "CEF Dalga", "CEF Ruseni"
 ]
@@ -606,6 +606,7 @@ PLANTS_METHOD = {
     "Preferato":               "shared",
     "Raimondenergy 1MW":       "shared",
     "CEF KBO Sibiciu de sus":  "shared",
+    "CEF Domnesti":            "shared",
     "RES_ENERGY_PVPP":         "smartlogger",
     "Luxus_Energy_PVPP":       "station_logger",
     "Trecon":                  "trecon",
