@@ -582,11 +582,11 @@ def get_sen_history():
 
 ALL_PLANTS = [
     "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-    "KEK HAL 2100KW", "Parc Fotovoltaic Codlea",
-    "SunlightGreen", "TopAgro_PV+BESS", "En-Prest", "Preferato",
+    "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
+    "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
     "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
-    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon","Foton Plus Urzica", "CEF Dalga", "Albesti", "Skipass", "ML MV Green Energy", "CEF Ruseni", "RAAL_PB_7.371MWp_6.02MW", "CEF Miercurea Ciuc"
-     
+    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon", "En-Prest",
+    "CEF Miercurea Ciuc", "ML MV Green Energy", "CEF Dalga", "CEF Ruseni"
 ]
 
 # Metoda per planta — copie din schedule_executor.py / curtail_listener_v3.py
@@ -613,7 +613,6 @@ PLANTS_METHOD = {
     "CEF Miercurea Ciuc":      "smartlogger",
     "CEF Dalga":               "goodwe_dalga",
     "CEF Ruseni": 	       "growatt",
-    "Foton Plus Urzica":       "trecon",
 }
 
 # kw_max per planta — copie din inverter_config.py
