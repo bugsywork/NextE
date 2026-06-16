@@ -626,7 +626,7 @@ INVERTER_KW_MAX = {
     "KEK HAL 2100KW":          2100.0,
     "Parc Fotovoltaic Codlea": 2000.0,
     "RAAL_PB_7.371MWp_6.02MW": 5600.0,
-    "SunlightGreen":           1607.0,
+    "SunlightGreen":           1608.0,
     "TopAgro_PV+BESS":         770.0,
     "RES_ENERGY_PVPP":         2400.0,
     "Luxus_Energy_PVPP":       2925.0,
@@ -644,7 +644,7 @@ INVERTER_CONFIG = {
     "Preferato":              {"sets": [{"kw_per_inverter": 215.0}]},
     "Raimondenergy 1MW":      {"sets": [{"kw_per_inverter": 89.0}]},
     "CEF KBO Sibiciu de sus": {"sets": [{"kw_per_inverter": 110.0}]},
-    "En-Prest":               {"sets": [{"kw_per_inverter": 330.0}]},
+    "En-Prest":               {"sets": [{"kw_per_inverter": 305.56}]},
 }
 
 
