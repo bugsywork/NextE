@@ -585,7 +585,7 @@ ALL_PLANTS = [
     "KEK HAL 2100KW", "Parc Fotovoltaic Codlea",
     "SunlightGreen", "TopAgro_PV+BESS", "En-Prest", "Preferato",
     "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
-    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon","Foton Plus Urzica", "CEF Dalga", "Albesti", "Skipass", "ML MV Green Energy", "CEF Ruseni", "RAAL_PB_7.371MWp_6.02MW", "CEF Miercurea Ciuc"
+    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "IF - Saftica CEF 1 MW", "Trecon","Foton Plus Urzica", "CEF Dalga", "Albesti", "Skipass", "ML MV Green Energy", "CEF Ruseni", "RAAL_PB_7.371MWp_6.02MW", "CEF Miercurea Ciuc"
      
 ]
 
@@ -614,6 +614,7 @@ PLANTS_METHOD = {
     "CEF Dalga":               "goodwe_dalga",
     "CEF Ruseni": 	       "growatt",
     "Foton Plus Urzica":       "trecon",
+    "IF - Saftica CEF 1 MW":   "trecon",
 }
 
 # kw_max per planta — copie din inverter_config.py
