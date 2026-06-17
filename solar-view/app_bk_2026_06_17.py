@@ -644,7 +644,7 @@ INVERTER_CONFIG = {
     "Preferato":              {"sets": [{"kw_per_inverter": 215.0}]},
     "Raimondenergy 1MW":      {"sets": [{"kw_per_inverter": 89.0}]},
     "CEF KBO Sibiciu de sus": {"sets": [{"kw_per_inverter": 110.0}]},
-    "En-Prest":               {"sets": [{"kw_per_inverter": 330.0}]},
+    "En-Prest":               {"sets": [{"kw_per_inverter": 305.56}]},
 }
 
 
