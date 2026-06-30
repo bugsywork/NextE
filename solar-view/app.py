@@ -612,7 +612,7 @@ PLANTS_METHOD = {
     "En-Prest":                "shared",
     "CEF Miercurea Ciuc":      "smartlogger",
     "CEF Dalga":               "goodwe_dalga",
-    "CEF Ruseni": 	       "growatt",
+    "CEF Ruseni": 	       "united",
     "Foton Plus Urzica":       "trecon",
     "IF - Saftica CEF 1 MW":   "trecon",
 }
