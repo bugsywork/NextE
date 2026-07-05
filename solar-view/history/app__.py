@@ -26,8 +26,8 @@ except ImportError:
 # ============================================================================
 
 st.set_page_config(
-    page_title="Solar Plants Status",
-    page_icon="🌞",
+    page_title="NextE Commander",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -153,6 +153,62 @@ def get_status_from_supabase():
         return None, [], [], f"Database error: {str(e)}"
 
 
+
+@st.cache_data(ttl=60)
+def get_delay_status():
+    """
+    Delay per plant:
+    1. Parse 'delay (Xm)' from status_text in solar_plants_status
+    2. For plants without delay text (no fetch / no upload / critical),
+       calculate age live from fs_power_master.
+    """
+    import re
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        bucharest_tz = ZoneInfo("Europe/Bucharest")
+        now_local = datetime.now(bucharest_tz).replace(tzinfo=None)
+
+        ts_result = supabase.table('solar_plants_status')\
+            .select('timestamp')\
+            .order('timestamp', desc=True)\
+            .limit(1)\
+            .execute()
+        if not ts_result.data:
+            return []
+        latest_ts = ts_result.data[0]['timestamp']
+
+        result = supabase.table('solar_plants_status')\
+            .select('plant_name,status_text,severity')\
+            .eq('timestamp', latest_ts)\
+            .execute()
+        if not result.data:
+            return []
+
+        delay_list = []
+
+        for row in result.data:
+            status_text = row.get('status_text', '') or ''
+            plant_name = row.get('plant_name', '')
+            match = re.search(r'[Dd][Ee][Ll][Aa][Yy]\s*\((\d+)m\)', status_text)
+            if not match:
+                # No delay text = fetch is working fine, skip
+                continue
+            age_min = int(match.group(1))
+            if age_min > 60:
+                level = 'critical'
+            elif age_min > 30:
+                level = 'major'
+            elif age_min > 15:
+                level = 'warning'
+            else:
+                level = 'ok'
+            delay_list.append({'name': plant_name, 'age_min': age_min, 'level': level})
+
+        delay_list.sort(key=lambda x: x['age_min'], reverse=True)
+        return delay_list
+    except Exception as e:
+        return []
+
 def count_severity(plants_list, severity):
     return len([p for p in plants_list if p['severity'] == severity])
 
@@ -277,14 +333,361 @@ def get_sen_history():
 # MAIN APP
 # ============================================================================
 
+# ============================================================================
+# PLANTS CONFIG — single source of truth, folosit in Tab 2 + Tab 3
+# ============================================================================
+
+ALL_PLANTS = [
+    "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
+    "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
+    "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
+    "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
+    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "Trecon"
+]
+
+# Metoda per planta — copie din schedule_executor.py / curtail_listener_v3.py
+# Trebuie mentinut sincron cu fisierele listener cand se adauga plante noi
+PLANTS_METHOD = {
+    "Ro_Ulmu_Fase2":           "shared",
+    "CEF ECORAY":              "smartlogger",
+    "CEF GIULIA SOLAR":        "smartlogger",
+    "FULVA 3125KW":            "smartlogger",
+    "KEK HAL 2100KW":          "smartlogger",
+    "Parc Fotovoltaic Codlea": "smartlogger",
+    "RAAL_PB_7.371MWp_6.02MW": "smartlogger",
+    "SunlightGreen":           "smartlogger",
+    "TopAgro_PV+BESS":         "smartlogger",
+    "Albesti":                 "shared",
+    "Skipass":                 "shared",
+    "Preferato":               "shared",
+    "Raimondenergy 1MW":       "shared",
+    "CEF KBO Sibiciu de sus":  "shared",
+    "CEF Domnesti":            "shared",
+    "RES_ENERGY_PVPP":         "smartlogger",
+    "Luxus_Energy_PVPP":       "station_logger",
+    "Trecon":                  "trecon",
+}
+
+# kw_max per planta — copie din inverter_config.py
+# Folosit pentru restore (trimite kw_max la invertor) si curtail procentual
+# Trebuie mentinut sincron cu inverter_config.py
+INVERTER_KW_MAX = {
+    "Albesti":                 838.0,
+    "CEF ECORAY":              1979.0,
+    "CEF GIULIA SOLAR":        2000.0,
+    "FULVA 3125KW":            3125.0,
+    "KEK HAL 2100KW":          2100.0,
+    "Parc Fotovoltaic Codlea": 2000.0,
+    "RAAL_PB_7.371MWp_6.02MW": 6020.0,
+    "SunlightGreen":           1600.0,
+    "TopAgro_PV+BESS":         770.0,
+    "RES_ENERGY_PVPP":         2400.0,
+    "Luxus_Energy_PVPP":       2925.0,
+    # Shared fara kw_max — restore foloseste kw_per_inverter din sets, nu kw_max
+    # Ro_Ulmu_Fase2, Skipass, Preferato, Raimondenergy 1MW,
+    # CEF KBO Sibiciu de sus, CEF Domnesti — kw_max None → listener le ignora la restore
+}
+
+
+def pct_to_kw_app(plant: str, pct: float, action: str):
+    """
+    Calculeaza kw de trimis in curtail_commands pentru o planta.
+    Logica identica cu schedule_executor.pct_to_kw().
+
+    Returns: float kw — valoarea de pus in payload
+             None — planta trebuie sarita (kw_max lipsa pentru restore/curtail partial)
+
+    Reguli:
+      - Trecon: 0.0 (listener propriu ignora kw, il trateaza intern)
+      - curtail 0%: shared → 0.1 kW, altele → 0.0 kW
+      - curtail >0%: kw_max * pct/100 (skip daca kw_max None)
+      - restore:  kw_max (skip daca kw_max None, exceptie shared care are sets in listener)
+    """
+    method = PLANTS_METHOD.get(plant, "smartlogger")
+
+    # Trecon — listener propriu, kw irelevant
+    if method == "trecon":
+        return 0.0
+
+    kw_max = INVERTER_KW_MAX.get(plant)  # None daca nu e definit
+
+    if action == "restore":
+        if method == "shared":
+            # Shared plants: listenerii folosesc kw_per_inverter din INVERTER_CONFIG.sets
+            # Nu avem kw_max global → trimitem None si listenerii stiu ce sa faca
+            # (curtail_listener foloseste kw_per_inverter la restore pentru shared)
+            return None  # listener ignora kw la restore shared, foloseste sets intern
+        if kw_max is None:
+            return None  # skip — listener va sari planta
+        return float(kw_max)
+
+    # curtail
+    if pct == 0:
+        return 0.1 if method == "shared" else 0.0
+
+    # curtail partial (pct > 0)
+    if kw_max is None:
+        return None  # skip — nu stim kw_max
+    return round(float(kw_max) * pct / 100, 1)
+
+
 def main():
 
     bucharest_tz = ZoneInfo("Europe/Bucharest")
     bucharest_now = datetime.now(bucharest_tz)
 
-    st.title("🌞 Solar Plants Dashboard")
+    # ── Session state defaults ─────────────────────────────────────────────────
+    for _key in ["confirm_curtail_all", "confirm_restore_all",
+                 "confirm_curtail_sel", "confirm_restore_sel",
+                 "curtail_in_progress"]:
+        if _key not in st.session_state:
+            st.session_state[_key] = False
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🌞 Monitoring", "⚡ Curtailment", "🇷🇴 SEN & Piață", "📧 Notificări Oprire", "📈 Forecast vs Actuals"])
+    # ── Commander CSS ──────────────────────────────────────────────────────────
+    st.markdown("""
+<style>
+/* ── Fonts ── */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif !important;
+}
+
+/* ── Hide Streamlit chrome ── */
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding: 1.2rem 2rem 2rem !important; max-width: 100% !important; }
+
+/* ── Dark background ── */
+.stApp { background: #0d0f14 !important; }
+section[data-testid="stSidebar"] { background: #0d0f14 !important; }
+
+/* ── Top header bar ── */
+.nexte-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 0 18px;
+    border-bottom: 1px solid #1e2330;
+    margin-bottom: 20px;
+}
+.nexte-logo {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+    letter-spacing: -0.3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.nexte-logo-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #F5A623;
+    box-shadow: 0 0 8px #F5A62388;
+}
+.nexte-pill {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-family: 'DM Mono', monospace;
+}
+.nexte-pill-green { background: #0d2a1a; color: #2ECC71; border: 1px solid #2ECC7133; }
+.nexte-pill-amber { background: #2a1e0a; color: #F5A623; border: 1px solid #F5A62333; }
+.nexte-pill-red   { background: #2a0d0d; color: #E74C3C; border: 1px solid #E74C3C33; }
+.nexte-pill-blue  { background: #0d1a2a; color: #3498DB; border: 1px solid #3498DB33; }
+.nexte-time {
+    margin-left: auto;
+    font-size: 12px;
+    color: #4a5068;
+    font-family: 'DM Mono', monospace;
+}
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: transparent !important;
+    gap: 4px;
+    border-bottom: 1px solid #1e2330 !important;
+    padding-bottom: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    color: #4a5068 !important;
+    border-radius: 8px 8px 0 0 !important;
+    padding: 8px 18px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    border: none !important;
+    transition: all 0.2s !important;
+}
+.stTabs [aria-selected="true"] {
+    background: #1a1f2e !important;
+    color: #ffffff !important;
+    border-bottom: 2px solid #F5A623 !important;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: #ffffff !important;
+    background: #1a1f2e88 !important;
+}
+.stTabs [data-baseweb="tab-panel"] {
+    background: transparent !important;
+    padding-top: 20px !important;
+}
+
+/* ── Metrics ── */
+[data-testid="metric-container"] {
+    background: #131720 !important;
+    border: 1px solid #1e2330 !important;
+    border-radius: 12px !important;
+    padding: 16px !important;
+}
+[data-testid="metric-container"] label {
+    color: #4a5068 !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+}
+[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    color: #ffffff !important;
+    font-size: 26px !important;
+    font-weight: 600 !important;
+    font-family: 'DM Mono', monospace !important;
+}
+
+/* ── Dataframes / tables ── */
+[data-testid="stDataFrame"] {
+    border: 1px solid #1e2330 !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+}
+
+/* ── Expanders ── */
+[data-testid="stExpander"] {
+    background: #131720 !important;
+    border: 1px solid #1e2330 !important;
+    border-radius: 12px !important;
+    margin-bottom: 8px !important;
+}
+[data-testid="stExpander"] summary {
+    color: #c8ccd8 !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    padding: 12px 16px !important;
+}
+[data-testid="stExpander"] summary:hover {
+    background: #1a1f2e !important;
+    border-radius: 12px !important;
+}
+
+/* ── Buttons ── */
+.stButton button {
+    background: #1a1f2e !important;
+    color: #c8ccd8 !important;
+    border: 1px solid #2a3048 !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s !important;
+    font-family: 'DM Sans', sans-serif !important;
+}
+.stButton button:hover {
+    background: #232840 !important;
+    border-color: #F5A62366 !important;
+    color: #ffffff !important;
+}
+.stButton [kind="primary"] button, button[kind="primary"] {
+    background: #F5A623 !important;
+    color: #0d0f14 !important;
+    border-color: #F5A623 !important;
+    font-weight: 600 !important;
+}
+.stButton [kind="primary"] button:hover {
+    background: #e09520 !important;
+}
+
+/* ── Inputs ── */
+.stTextInput input, .stNumberInput input, .stSelectbox select,
+.stDateInput input, .stTimeInput input {
+    background: #131720 !important;
+    border: 1px solid #2a3048 !important;
+    border-radius: 8px !important;
+    color: #c8ccd8 !important;
+    font-family: 'DM Sans', sans-serif !important;
+}
+.stMultiSelect [data-baseweb="tag"] {
+    background: #1e2a1e !important;
+    color: #2ECC71 !important;
+    border: 1px solid #2ECC7133 !important;
+    border-radius: 6px !important;
+}
+
+/* ── Sliders ── */
+.stSlider [data-baseweb="slider"] [role="slider"] {
+    background: #F5A623 !important;
+    border-color: #F5A623 !important;
+}
+.stSlider [data-baseweb="slider"] [data-testid="stThumbValue"] {
+    color: #F5A623 !important;
+}
+
+/* ── Success / Error / Warning / Info ── */
+.stSuccess { background: #0d2a1a !important; border-color: #2ECC7144 !important; color: #2ECC71 !important; border-radius: 8px !important; }
+.stError   { background: #2a0d0d !important; border-color: #E74C3C44 !important; color: #E74C3C !important; border-radius: 8px !important; }
+.stWarning { background: #2a1e0a !important; border-color: #F5A62344 !important; color: #F5A623 !important; border-radius: 8px !important; }
+.stInfo    { background: #0d1a2a !important; border-color: #3498DB44 !important; color: #3498DB !important; border-radius: 8px !important; }
+
+/* ── Divider ── */
+hr { border-color: #1e2330 !important; }
+
+/* ── Caption / small text ── */
+.stCaption, [data-testid="stCaptionContainer"] {
+    color: #4a5068 !important;
+    font-size: 12px !important;
+}
+
+/* ── Markdown headers ── */
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.3px !important;
+}
+.stMarkdown h3 { font-size: 16px !important; color: #c8ccd8 !important; }
+
+/* ── Plotly charts background ── */
+.js-plotly-plot .plotly .bg { fill: #131720 !important; }
+
+/* ── Sidebar ── */
+.css-1d391kg { background: #0d0f14 !important; }
+
+/* ── Checkbox ── */
+.stCheckbox label { color: #c8ccd8 !important; font-size: 13px !important; }
+
+/* ── Schedule status badges ── */
+.badge-scheduled { background:#0d1a2a; color:#3498DB; border:1px solid #3498DB33; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:500; }
+.badge-active    { background:#2a1e0a; color:#F5A623; border:1px solid #F5A62333; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:500; }
+.badge-completed { background:#0d2a1a; color:#2ECC71; border:1px solid #2ECC7133; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:500; }
+.badge-cancelled { background:#1a1f2e; color:#4a5068; border:1px solid #2a304833; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:500; }
+.badge-failed    { background:#2a0d0d; color:#E74C3C; border:1px solid #E74C3C33; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:500; }
+</style>
+""", unsafe_allow_html=True)
+
+    # ── Header bar ────────────────────────────────────────────────────────────
+    from datetime import datetime as _dt_hdr
+    from zoneinfo import ZoneInfo as _ZI_hdr
+    _now_hdr = _dt_hdr.now(_ZI_hdr("Europe/Bucharest"))
+    st.markdown(f"""
+<div class="nexte-header">
+    <div class="nexte-logo">
+        <div class="nexte-logo-dot"></div>
+        NextE Commander
+    </div>
+    <span class="nexte-pill nexte-pill-green">⚡ Live</span>
+    <span class="nexte-time">{_now_hdr.strftime("%d %b %Y · %H:%M")} EET</span>
+</div>
+""", unsafe_allow_html=True)
+
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🌞 Monitoring", "⚡ Curtailment", "📅 Schedule", "🇷🇴 SEN & Piață", "📧 Notificări Oprire", "📈 Forecast vs Actuals"])
 
     # ============================
     # TAB 1: MONITORING (existing)
@@ -304,16 +707,16 @@ def main():
             return
 
         # ====================================================================
-        # CATEGORIZE BY SEVERITY
+        # CATEGORIZE BY SEVERITY (production only, exclude delay severity)
         # ====================================================================
 
         ok_plants       = [p for p in plants if p['severity'] == 'ok']
         warning_plants  = [p for p in plants if p['severity'] == 'warning']
         major_plants    = [p for p in plants if p['severity'] == 'major']
         critical_plants = [p for p in plants if p['severity'] == 'critical']
-        delay_plants    = [p for p in plants if p['severity'] == 'delay']
+        # delay_plants from solar_plants_status ignored - we use live delay below
 
-        total_problems = len(critical_plants) + len(major_plants) + len(warning_plants) + len(delay_plants)
+        total_problems = len(critical_plants) + len(major_plants) + len(warning_plants)
 
         # ====================================================================
         # DATA STALENESS CHECK
@@ -351,26 +754,47 @@ def main():
         # TOP SUMMARY METRICS WITH DELTA
         # ====================================================================
 
-        st.markdown("### 📊 Overview")
+        # ====================================================================
+        # OVERVIEW - combined production + freshness, worst case per plant
+        # ====================================================================
+        st.markdown("### 📊 Status Overview")
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        delay_list = get_delay_status()
 
-        delta_ok       = len(ok_plants)       - count_severity(plants_prev, 'ok')       if plants_prev else None
-        delta_critical = len(critical_plants) - count_severity(plants_prev, 'critical') if plants_prev else None
-        delta_major    = len(major_plants)    - count_severity(plants_prev, 'major')    if plants_prev else None
-        delta_warning  = len(warning_plants)  - count_severity(plants_prev, 'warning')  if plants_prev else None
-        delta_delay    = len(delay_plants)    - count_severity(plants_prev, 'delay')    if plants_prev else None
+        # Build combined severity per plant name
+        delay_by_name = {d['name']: d for d in delay_list if d['level'] != 'ok'}
+        prod_by_name  = {p['name']: p for p in critical_plants + major_plants + warning_plants}
 
+        def combined_severity(name):
+            sev_order = {'critical': 0, 'major': 1, 'warning': 2}
+            prod = prod_by_name.get(name)
+            delay = delay_by_name.get(name)
+            candidates = []
+            if prod:
+                candidates.append(prod['severity'])
+            if delay:
+                candidates.append(delay['level'])
+            if not candidates:
+                return 'ok'
+            return min(candidates, key=lambda s: sev_order.get(s, 99))
+
+        all_names = [p['name'] for p in plants]
+        n_critical = len([n for n in all_names if combined_severity(n) == 'critical'])
+        n_major    = len([n for n in all_names if combined_severity(n) == 'major'])
+        n_warning  = len([n for n in all_names if combined_severity(n) == 'warning'])
+        n_ok       = len(all_names) - n_critical - n_major - n_warning
+
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric(label="🟢 OK", value=len(ok_plants), delta=delta_ok, delta_color="normal")
+            st.metric(label="🟢 OK", value=n_ok)
         with col2:
-            st.metric(label="🔴 Critical", value=len(critical_plants), delta=delta_critical, delta_color="inverse")
+            st.metric(label="🔴 Critical", value=n_critical)
         with col3:
-            st.metric(label="🟠 Major", value=len(major_plants), delta=delta_major, delta_color="inverse")
+            st.metric(label="🟠 Major", value=n_major)
         with col4:
-            st.metric(label="🔵 Warning", value=len(warning_plants), delta=delta_warning, delta_color="inverse")
-        with col5:
-            st.metric(label="⏱️ Delay", value=len(delay_plants), delta=delta_delay, delta_color="inverse")
+            st.metric(label="🔵 Warning", value=n_warning)
+
+
 
         if data_age_minutes < 1:
             age_label = "acum câteva secunde"
@@ -384,71 +808,89 @@ def main():
         # PIE CHART
         # ====================================================================
 
+
+
         st.markdown("---")
-        col_chart, col_legend = st.columns([3, 1])
+        st.markdown("### 📈 Status Distribution")
 
-        with col_chart:
-            st.markdown("### 📈 Status Distribution")
+        # Single pie: OK = all plants with no production issue AND no delay issue
+        # others based on worst severity per plant
+        all_plant_names = set(p['name'] for p in plants)
+        issue_names = set(p['name'] for p in critical_plants + major_plants + warning_plants)
+        issue_names.update(d['name'] for d in delay_list if d['level'] != 'ok')
 
-            labels, values, colors = [], [], []
-            if len(ok_plants) > 0:
-                labels.append(f"OK ({len(ok_plants)})"); values.append(len(ok_plants)); colors.append("#00B050")
-            if len(critical_plants) > 0:
-                labels.append(f"Critical ({len(critical_plants)})"); values.append(len(critical_plants)); colors.append("#FF0000")
-            if len(major_plants) > 0:
-                labels.append(f"Major ({len(major_plants)})"); values.append(len(major_plants)); colors.append("#FFC000")
-            if len(warning_plants) > 0:
-                labels.append(f"Warning ({len(warning_plants)})"); values.append(len(warning_plants)); colors.append("#0070C0")
-            if len(delay_plants) > 0:
-                labels.append(f"Delay ({len(delay_plants)})"); values.append(len(delay_plants)); colors.append("#808080")
+        n_ok = len(all_plant_names - issue_names)
+        n_critical = len([n for n in all_plant_names if combined_severity(n) == 'critical'])
+        n_major    = len([n for n in all_plant_names if combined_severity(n) == 'major'])
+        n_warning  = len([n for n in all_plant_names if combined_severity(n) == 'warning'])
 
+        labels, values, colors = [], [], []
+        if n_ok > 0:
+            labels.append(f"OK ({n_ok})"); values.append(n_ok); colors.append("#00B050")
+        if n_critical > 0:
+            labels.append(f"Critical ({n_critical})"); values.append(n_critical); colors.append("#FF0000")
+        if n_major > 0:
+            labels.append(f"Major ({n_major})"); values.append(n_major); colors.append("#FFC000")
+        if n_warning > 0:
+            labels.append(f"Warning ({n_warning})"); values.append(n_warning); colors.append("#0070C0")
+        if labels:
             fig = go.Figure(data=[go.Pie(
                 labels=labels, values=values, marker=dict(colors=colors),
                 textinfo='label+percent', hovertemplate='%{label}<br>%{percent}<extra></extra>', hole=0.3
             )])
-            fig.update_layout(showlegend=False, height=400, margin=dict(t=20, b=20, l=20, r=20))
+            fig.update_layout(showlegend=False, height=350, margin=dict(t=10, b=10, l=10, r=10))
             st.plotly_chart(fig, use_container_width=True)
 
-        with col_legend:
-            st.markdown("### 📋 Legend")
-            st.markdown("🟢 **OK**"); st.caption("Normal operation")
-            st.markdown("🔴 **Critical**"); st.caption("No data / No fetch")
-            st.markdown("🟠 **Major**"); st.caption("Recovery from zero")
-            st.markdown("🔵 **Warning**"); st.caption("First suspect issue")
-            st.markdown("⏱️ **Delay**"); st.caption("Data delay only")
 
         # ====================================================================
-        # PROBLEMS LIST
+        # PROBLEMS LIST - combined production + delay
         # ====================================================================
 
-        if total_problems > 0:
+        # Build combined issues - merge production + delay per plant
+
+        # All plant names that have any issue
+        all_issue_names = set()
+        for p in critical_plants + major_plants + warning_plants:
+            all_issue_names.add(p['name'])
+        for d in delay_by_name.values():
+            all_issue_names.add(d['name'])
+
+
+
+        sorted_issues = sorted(all_issue_names,
+            key=lambda n: ({'critical': 0, 'major': 1, 'warning': 2}.get(combined_severity(n), 99), n))
+
+        if sorted_issues:
             st.markdown("---")
-            st.markdown(f"### ⚠️ Plants with Issues ({total_problems})")
+            st.markdown(f"### ⚠️ Plants with Issues ({len(sorted_issues)})")
             contacts = load_contacts()
-            if critical_plants:
-                st.markdown("#### 🔴 Critical Issues")
-                for p in critical_plants:
-                    st.error(f"**{p['name']}**")
-                    st.markdown(f"> {p['status']}")
-                    render_contact_info(p['name'], contacts)
-            if major_plants:
-                st.markdown("#### 🟠 Major Issues")
-                for p in major_plants:
-                    st.warning(f"**{p['name']}**")
-                    st.markdown(f"> {p['status']}")
-                    render_contact_info(p['name'], contacts)
-            if warning_plants:
-                st.markdown("#### 🔵 Warnings")
-                for p in warning_plants:
-                    st.info(f"**{p['name']}**")
-                    st.markdown(f"> {p['status']}")
-                    render_contact_info(p['name'], contacts)
-            if delay_plants:
-                st.markdown("#### ⏱️ Data Delays")
-                for p in delay_plants:
-                    st.info(f"⏱️ **{p['name']}**")
-                    st.markdown(f"> {p['status']}")
-                    render_contact_info(p['name'], contacts)
+            sev_emoji = {'critical': '🔴', 'major': '🟠', 'warning': '🔵'}
+            sev_fn = {'critical': st.error, 'major': st.warning, 'warning': st.info}
+
+            prev_sev = None
+            for name in sorted_issues:
+                sev = combined_severity(name)
+                if sev != prev_sev:
+                    sev_label = {'critical': '🔴 Critical', 'major': '🟠 Major', 'warning': '🔵 Warning'}.get(sev, sev)
+                    st.markdown(f"#### {sev_label}")
+                    prev_sev = sev
+
+                prod = prod_by_name.get(name)
+                delay = delay_by_name.get(name)
+
+                # Build description line
+                parts = []
+                if prod:
+                    parts.append(prod['status'])
+                if delay:
+                    parts.append(f"delay {delay['age_min']} min")
+                desc = " | ".join(parts)
+
+                display_fn = sev_fn.get(sev, st.info)
+                display_fn(f"**{name}** — {desc}")
+                render_contact_info(name, contacts)
+                st.markdown("")
+
         else:
             st.success("✅ All plants operating normally!")
 
@@ -486,192 +928,670 @@ def main():
     with tab2:
         st.markdown("### ⚡ Curtailment Control")
 
-        # Password protection
+        # Password protection + session timeout 2h
         if "curtail_authenticated" not in st.session_state:
             st.session_state["curtail_authenticated"] = False
+            st.session_state["curtail_auth_time"] = None
+
+        # Verifică timeout 2h
+        if st.session_state["curtail_authenticated"]:
+            auth_time = st.session_state.get("curtail_auth_time")
+            if auth_time and (datetime.now() - auth_time).total_seconds() > 7200:
+                st.session_state["curtail_authenticated"] = False
+                st.session_state["curtail_auth_time"] = None
+                st.warning("⏱️ Sesiunea a expirat (2h). Re-autentificare necesară.")
 
         if not st.session_state["curtail_authenticated"]:
             st.warning("🔒 Acces restricționat")
             pwd = st.text_input("Parolă:", type="password", key="curtail_pwd")
             if st.button("Autentificare", key="curtail_login"):
-                if pwd == st.secrets.get("curtail_password", ""):
+                expected = st.secrets.get("curtail_password", "")
+                if not expected:
+                    st.error("❌ Parola nu este configurată în secrets!")
+                elif pwd and pwd == expected:
                     st.session_state["curtail_authenticated"] = True
+                    st.session_state["curtail_auth_time"] = datetime.now()
                     st.rerun()
                 else:
                     st.error("❌ Parolă incorectă")
-            st.stop()
-
-        ALL_PLANTS = [
-            "Ro_Ulmu_Fase2", "CEF ECORAY", "CEF GIULIA SOLAR", "FULVA 3125KW",
-            "KEK HAL 2100KW", "Parc Fotovoltaic Codlea", "RAAL_PB_7.371MWp_6.02MW",
-            "SunlightGreen", "TopAgro_PV+BESS", "Albesti", "Skipass", "Preferato",
-            "Raimondenergy 1MW", "CEF KBO Sibiciu de sus", "CEF Domnesti",
-            "RES_ENERGY_PVPP", "Luxus_Energy_PVPP"
-        ]
-
-        # ---- Helper functions ----
-        @st.cache_data(ttl=15)
-        def get_curtail_status():
-            try:
-                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-                result = supabase.table('curtail_commands') \
-                    .select('*') \
-                    .order('created_at', desc=True) \
-                    .limit(1) \
-                    .execute()
-                if result.data:
-                    return result.data[0]
-                return None
-            except Exception as e:
-                return None
-
-        @st.cache_data(ttl=15)
-        def get_curtail_history():
-            try:
-                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-                result = supabase.table('curtail_commands') \
-                    .select('*') \
-                    .order('created_at', desc=True) \
-                    .limit(10) \
-                    .execute()
-                return result.data if result.data else []
-            except Exception as e:
-                return []
-
-        def send_curtail_command(action: str, plants: list = None):
-            try:
-                supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-                payload = {
-                    "action": action,
-                    "kw": 0.0 if action == "curtail" else 99999.0,
-                    "plants": plants if plants else ALL_PLANTS,
-                    "status": "pending",
-                    "created_at": datetime.now(ZoneInfo("Europe/Bucharest")).isoformat()
-                }
-                result = supabase.table('curtail_commands').insert(payload).execute()
-                return True, "Comandă trimisă cu succes!"
-            except Exception as e:
-                return False, f"Eroare: {str(e)}"
-
-        # ---- Current Status ----
-        last_cmd = get_curtail_status()
-        col_status, col_info = st.columns([1, 2])
-        with col_status:
-            if last_cmd:
-                action = last_cmd.get('action', 'unknown').upper()
-                status = last_cmd.get('status', 'unknown')
-                ts = last_cmd.get('created_at', '')[:16].replace('T', ' ')
-                if action == 'CURTAIL':
-                    st.error(f"🔴 **CURTAILED**")
-                else:
-                    st.success(f"🟢 **RESTORED**")
-                st.caption(f"Status: `{status}` | {ts}")
-            else:
-                st.info("ℹ️ Nicio comandă anterioară")
-
-        with col_info:
-            st.markdown("**Comandă rapidă — toate cele 17 centrale:**")
-            col_c, col_r = st.columns(2)
-            with col_c:
-                if st.button("🔴 CURTAIL ALL", type="primary", use_container_width=True):
-                    ok, msg = send_curtail_command("curtail", ALL_PLANTS)
-                    if ok:
-                        st.success(msg)
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(msg)
-            with col_r:
-                if st.button("🟢 RESTORE ALL", use_container_width=True):
-                    ok, msg = send_curtail_command("restore", ALL_PLANTS)
-                    if ok:
-                        st.success(msg)
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
-        st.markdown("---")
-
-        # ---- Selective plant curtailment ----
-        with st.expander("🎯 Comandă selectivă — centrale individuale"):
-            select_all = st.checkbox("Toate centralele (17)", value=True)
-            if select_all:
-                selected_plants = ALL_PLANTS
-            else:
-                selected_plants = st.multiselect(
-                    "Selectați centralele:",
-                    options=ALL_PLANTS,
-                    default=[]
-                )
-            if selected_plants:
-                col_cs, col_rs = st.columns(2)
-                with col_cs:
-                    if st.button(f"🔴 CURTAIL ({len(selected_plants)})", key="curtail_sel", use_container_width=True):
-                        ok, msg = send_curtail_command("curtail", selected_plants)
-                        if ok:
-                            st.success(msg)
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(msg)
-                with col_rs:
-                    if st.button(f"🟢 RESTORE ({len(selected_plants)})", key="restore_sel", use_container_width=True):
-                        ok, msg = send_curtail_command("restore", selected_plants)
-                        if ok:
-                            st.success(msg)
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-        # ---- Command History ----
-        st.markdown("#### 📋 Istoric comenzi (ultimele 10)")
-        history = get_curtail_history()
-        if history:
-            for cmd in history:
-                action = cmd.get('action', '?').upper()
-                status = cmd.get('status', '?')
-                ts = cmd.get('created_at', '')[:16].replace('T', ' ')
-                plants_list = cmd.get('plants', [])
-                n_plants = len(plants_list) if isinstance(plants_list, list) else '?'
-                icon = "🔴" if action == "CURTAIL" else "🟢"
-                status_badge = "✅" if status == "completed" else ("⏳" if status == "pending" else "❌")
-                with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale"):
-                    results = cmd.get('result') or cmd.get('results')
-                    # Normalizează: poate fi list sau dict sau JSON string
-                    if isinstance(results, str):
-                        try:
-                            import json as _json
-                            results = _json.loads(results)
-                        except Exception:
-                            results = None
-
-                    if isinstance(results, list) and results:
-                        ok_plants   = [r for r in results if r.get('success')]
-                        fail_plants = [r for r in results if not r.get('success')]
-                        if ok_plants:
-                            st.success(f"✅ Reușite ({len(ok_plants)}): " + ", ".join(r['plant'] for r in ok_plants))
-                        if fail_plants:
-                            st.error(f"❌ Eșuate ({len(fail_plants)}):")
-                            for r in fail_plants:
-                                st.caption(f"  • **{r['plant']}** — {r.get('error', 'eroare necunoscută')}")
-                    elif isinstance(results, dict) and results:
-                        for plant, res in results.items():
-                            ok_icon = "✅" if res.get('success') else "❌"
-                            err = res.get('error', '')
-                            st.caption(f"{ok_icon} **{plant}** {err}")
-                    else:
-                        # Nu avem rezultate încă (running/pending)
-                        if isinstance(plants_list, list) and plants_list:
-                            st.write(", ".join(plants_list))
         else:
-            st.caption("Nicio comandă în baza de date.")
+
+            # ── A: Heartbeat check — listeneri activi? ────────────────────────
+            def get_service_health():
+                try:
+                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    result = supabase.table("system_health").select("*").execute()
+                    return {row["service"]: row for row in (result.data or [])}
+                except Exception:
+                    return {}
+
+            health = get_service_health()
+            now_utc = datetime.now(ZoneInfo("UTC"))
+            STALE_SECONDS = 120  # 2 min = considerat mort
+
+            services = {
+                "curtail_listener":  "⚡ FusionSolar Listener",
+                "trecon_listener":   "🔌 Trecon Listener",
+                "schedule_executor": "📅 Schedule Executor",
+            }
+
+            dead_services = []
+            for svc_key, svc_label in services.items():
+                row = health.get(svc_key)
+                if not row:
+                    dead_services.append(f"{svc_label} — **niciodată pornit**")
+                    continue
+                try:
+                    last = datetime.fromisoformat(row["last_alive"].replace("Z", "+00:00"))
+                    age_s = (now_utc - last).total_seconds()
+                    if age_s > STALE_SECONDS:
+                        mins = int(age_s // 60)
+                        dead_services.append(f"{svc_label} — **mort de {mins} min**")
+                except Exception:
+                    dead_services.append(f"{svc_label} — **status necunoscut**")
+
+            if dead_services:
+                st.error(
+                    "🚨 **ATENȚIE — SERVICII INACTIVE! Comenzile NU vor fi executate!**\n\n" +
+                    "\n".join(f"• {s}" for s in dead_services)
+                )
+            else:
+                st.success("✅ Toți listenerii activi — sistemul e operațional")
+
+            # ── B: Comenzi pending/running > 2 min dar < 2h → warning ──────────
+            def get_stuck_commands():
+                try:
+                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    # Doar comenzile din ultimele 2 ore — cele mai vechi sunt istoric mort
+                    since = (datetime.now(ZoneInfo("UTC")) - timedelta(hours=2)).isoformat()
+                    result = supabase.table("curtail_commands") \
+                        .select("id,action,status,created_at,plants") \
+                        .in_("status", ["pending", "running"]) \
+                        .gte("created_at", since) \
+                        .order("created_at", desc=False) \
+                        .execute()
+                    stuck = []
+                    for cmd in (result.data or []):
+                        try:
+                            created = datetime.fromisoformat(
+                                cmd["created_at"].replace("Z", "+00:00")
+                            )
+                            age_s = (now_utc - created).total_seconds()
+                            if age_s > 120:
+                                stuck.append({**cmd, "age_min": round(age_s / 60, 1)})
+                        except Exception:
+                            pass
+                    return stuck
+                except Exception:
+                    return []
+
+            stuck_cmds = get_stuck_commands()
+            if stuck_cmds:
+                for sc in stuck_cmds:
+                    n = len(sc.get("plants") or [])
+                    st.warning(
+                        f"⚠️ **Comandă blocată!** `{sc['action'].upper()}` pe {n} centrale — "
+                        f"status `{sc['status']}` de **{sc['age_min']} min**. "
+                        f"Verifică dacă listenerul rulează!"
+                    )
+
+            st.markdown("---")
+            @st.cache_data(ttl=15)
+            def get_curtail_status():
+                try:
+                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    result = supabase.table('curtail_commands') \
+                        .select('*') \
+                        .order('created_at', desc=True) \
+                        .limit(1) \
+                        .execute()
+                    if result.data:
+                        return result.data[0]
+                    return None
+                except Exception as e:
+                    return None
+
+            @st.cache_data(ttl=15)
+            def get_curtail_history():
+                try:
+                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    result = supabase.table('curtail_commands') \
+                        .select('*') \
+                        .order('created_at', desc=True) \
+                        .limit(10) \
+                        .execute()
+                    return result.data if result.data else []
+                except Exception as e:
+                    return []
+
+            def send_curtail_command(action: str, plants: list = None, pct: float = 0.0):
+                """
+                Trimite comanda curtail/restore in Supabase.
+                pct: 0-100 (procent setpoint). 0 = oprire completa.
+                kw per planta calculat via pct_to_kw_app().
+                Plantele fara kw_max definit sunt sarite la curtail partial si restore.
+                """
+                try:
+                    import uuid as _uuid
+                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    # Idempotency — verifica daca exista deja o comanda identica pending/running
+                    # in ultimele 60 secunde (double-click protection)
+                    recent = supabase.table("curtail_commands") \
+                        .select("id,created_at") \
+                        .eq("action", action) \
+                        .in_("status", ["pending", "running"]) \
+                        .order("created_at", desc=True) \
+                        .limit(1) \
+                        .execute()
+                    if recent.data:
+                        try:
+                            last_ts = datetime.fromisoformat(
+                                recent.data[0]["created_at"].replace("Z", "+00:00")
+                            )
+                            age_s = (datetime.now(ZoneInfo("UTC")) - last_ts).total_seconds()
+                            if age_s < 60:
+                                return False, f"⚠️ Comandă {action.upper()} deja în curs (acum {int(age_s)}s). Așteaptă finalizarea."
+                        except Exception:
+                            pass
+
+                    target_plants = plants if plants else ALL_PLANTS
+
+                    # Calculeaza kw per planta si filtreaza plantele invalide
+                    valid_plants = []
+                    kw_send = 0.0  # kw pentru prima planta non-Trecon (listenerii folosesc acelasi kw)
+                    skipped = []
+                    for plant in target_plants:
+                        kw_val = pct_to_kw_app(plant, pct, action)
+                        if kw_val is None:
+                            skipped.append(plant)
+                            continue
+                        valid_plants.append(plant)
+                        # kw_send = valoarea non-Trecon (Trecon are listener propriu)
+                        if PLANTS_METHOD.get(plant) != "trecon" and kw_send == 0.0 and kw_val > 0:
+                            kw_send = kw_val
+
+                    if not valid_plants:
+                        return False, f"⚠️ Nicio plantă validă — toate au kw_max nedefinit."
+
+                    if skipped:
+                        # Nu blocam, doar informam — listenerii vor sari oricum
+                        pass
+
+                    payload = {
+                        "action":      action,
+                        "kw":          kw_send,
+                        "plants":      valid_plants,
+                        "status":      "pending",
+                        "created_at":  datetime.now(ZoneInfo("UTC")).isoformat(),
+                        "command_uid": str(_uuid.uuid4()),
+                    }
+                    result = supabase.table("curtail_commands").insert(payload).execute()
+                    msg = "Comandă trimisă cu succes!"
+                    if skipped:
+                        msg += f" (sărite fără kw_max: {', '.join(skipped)})"
+                    return True, msg
+                except Exception as e:
+                    return False, f"Eroare: {str(e)}"
+
+            # ---- Current Status ----
+            last_cmd = get_curtail_status()
+            col_status, col_info = st.columns([1, 2])
+            with col_status:
+                if last_cmd:
+                    action = last_cmd.get('action', 'unknown').upper()
+                    status = last_cmd.get('status', 'unknown')
+                    ts = last_cmd.get('created_at', '')[:16].replace('T', ' ')
+                    kw_last = last_cmd.get('kw', 0)
+                    if action == 'CURTAIL':
+                        st.error(f"🔴 **CURTAILED**")
+                    else:
+                        st.success(f"🟢 **RESTORED**")
+                    st.caption(f"Status: `{status}` | {ts} | kw={kw_last}")
+                else:
+                    st.info("ℹ️ Nicio comandă anterioară")
+
+            with col_info:
+                # ── Setpoint % input ────────────────────────────────────────
+                _col_pct, _col_cap = st.columns([1, 3])
+                with _col_pct:
+                    curtail_pct = st.number_input(
+                        "Setpoint (%)",
+                        min_value=0.0, max_value=100.0, value=0.0, step=10.0,
+                        format="%.1f",
+                        key="curtail_pct_input",
+                        help="0% = oprire completă | 99.9% = aproape fără limitare | 100% = fără limitare"
+                    )
+                with _col_cap:
+                    st.write("")
+                    if curtail_pct == 0.0:
+                        st.caption("🔴 0% — oprire completă (shared: 0.1 kW, smartlogger: 0 kW)")
+                    elif curtail_pct == 100.0:
+                        st.caption("🟢 100% — fără limitare")
+                    else:
+                        st.caption(f"🟡 {curtail_pct}% din puterea nominală per centrală")
+
+                st.markdown("**Comandă rapidă — toate cele 18 centrale:**")
+                col_c, col_r = st.columns(2)
+                with col_c:
+                    if st.button("🔴 CURTAIL ALL", type="primary", use_container_width=True,
+                                 disabled=st.session_state.get("curtail_in_progress", False)):
+                        st.session_state["confirm_curtail_all"] = True
+                if st.session_state.get("confirm_curtail_all"):
+                    st.error("⚠️ **Confirmare necesară!** Scrie `CURTAIL` mai jos și apasă butonul:")
+                    confirm_input = st.text_input("", key="confirm_curtail_input", placeholder="CURTAIL")
+                    col_yes, col_no = st.columns(2)
+                    with col_yes:
+                        if st.button("✅ Confirm CURTAIL ALL", key="confirm_curtail_yes",
+                                     disabled=confirm_input != "CURTAIL",
+                                     use_container_width=True):
+                            st.session_state["curtail_in_progress"] = True
+                            st.session_state["confirm_curtail_all"] = False
+                            ok, msg = send_curtail_command("curtail", ALL_PLANTS, pct=curtail_pct)
+                            st.session_state["curtail_in_progress"] = False
+                            if ok:
+                                st.success(msg)
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error(msg)
+                    with col_no:
+                        if st.button("❌ Anulează", key="confirm_curtail_no", use_container_width=True):
+                            st.session_state["confirm_curtail_all"] = False
+                            st.rerun()
+
+                with col_r:
+                    if st.button("🟢 RESTORE ALL", use_container_width=True,
+                                 disabled=st.session_state.get("curtail_in_progress", False)):
+                        st.session_state["confirm_restore_all"] = True
+                if st.session_state.get("confirm_restore_all"):
+                    st.warning("⚠️ **Confirmare necesară!** Scrie `RESTORE` mai jos și apasă butonul:")
+                    confirm_restore_input = st.text_input("", key="confirm_restore_input", placeholder="RESTORE")
+                    col_yes2, col_no2 = st.columns(2)
+                    with col_yes2:
+                        if st.button("✅ Confirm RESTORE ALL", key="confirm_restore_yes",
+                                     disabled=confirm_restore_input != "RESTORE",
+                                     use_container_width=True):
+                            st.session_state["curtail_in_progress"] = True
+                            st.session_state["confirm_restore_all"] = False
+                            ok, msg = send_curtail_command("restore", ALL_PLANTS, pct=100.0)
+                            st.session_state["curtail_in_progress"] = False
+                            if ok:
+                                st.success(msg)
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error(msg)
+                    with col_no2:
+                        if st.button("❌ Anulează", key="confirm_restore_no", use_container_width=True):
+                            st.session_state["confirm_restore_all"] = False
+                            st.rerun()
+
+            st.markdown("---")
+
+            # ---- Selective plant curtailment ----
+            with st.expander("🎯 Comandă selectivă — centrale individuale"):
+                select_all = st.checkbox("Toate centralele (18)", value=False)
+                if select_all:
+                    selected_plants = ALL_PLANTS
+                else:
+                    selected_plants = st.multiselect(
+                        "Selectați centralele:",
+                        options=ALL_PLANTS,
+                        default=[]
+                    )
+
+                if selected_plants:
+                    _col_spct, _col_scap = st.columns([1, 3])
+                    with _col_spct:
+                        sel_pct = st.number_input(
+                            "Setpoint (%)",
+                            min_value=0.0, max_value=100.0, value=0.0, step=10.0,
+                            format="%.1f",
+                            key="curtail_sel_pct",
+                            help="0% = oprire completă | 99.9% = aproape fără limitare"
+                        )
+                    with _col_scap:
+                        st.write("")
+                        if sel_pct == 0.0:
+                            st.caption("🔴 0% — oprire completă")
+                        elif sel_pct == 100.0:
+                            st.caption("🟢 100% — fără limitare")
+                        else:
+                            st.caption(f"🟡 {sel_pct}% din puterea nominală")
+
+                    col_cs, col_rs = st.columns(2)
+                    with col_cs:
+                        if st.button(f"🔴 CURTAIL ({len(selected_plants)})", key="curtail_sel",
+                                     use_container_width=True,
+                                     disabled=st.session_state.get("curtail_in_progress", False)):
+                            st.session_state["confirm_curtail_sel"] = True
+                    with col_rs:
+                        if st.button(f"🟢 RESTORE ({len(selected_plants)})", key="restore_sel",
+                                     use_container_width=True,
+                                     disabled=st.session_state.get("curtail_in_progress", False)):
+                            st.session_state["confirm_restore_sel"] = True
+
+                    if st.session_state.get("confirm_curtail_sel"):
+                        st.error(f"⚠️ Confirmare CURTAIL {sel_pct}% pentru: **{', '.join(selected_plants[:3])}{'...' if len(selected_plants) > 3 else ''}**")
+                        col_yc, col_nc = st.columns(2)
+                        with col_yc:
+                            if st.button("✅ Da, curtail", key="confirm_curtail_sel_yes", use_container_width=True):
+                                st.session_state["curtail_in_progress"] = True
+                                st.session_state["confirm_curtail_sel"] = False
+                                ok, msg = send_curtail_command("curtail", selected_plants, pct=sel_pct)
+                                st.session_state["curtail_in_progress"] = False
+                                if ok:
+                                    st.success(msg)
+                                    st.cache_data.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                        with col_nc:
+                            if st.button("❌ Anulează", key="confirm_curtail_sel_no", use_container_width=True):
+                                st.session_state["confirm_curtail_sel"] = False
+                                st.rerun()
+
+                    if st.session_state.get("confirm_restore_sel"):
+                        st.warning(f"⚠️ Confirmare RESTORE pentru: **{', '.join(selected_plants[:3])}{'...' if len(selected_plants) > 3 else ''}**")
+                        col_yr, col_nr = st.columns(2)
+                        with col_yr:
+                            if st.button("✅ Da, restore", key="confirm_restore_sel_yes", use_container_width=True):
+                                st.session_state["curtail_in_progress"] = True
+                                st.session_state["confirm_restore_sel"] = False
+                                ok, msg = send_curtail_command("restore", selected_plants, pct=100.0)
+                                st.session_state["curtail_in_progress"] = False
+                                if ok:
+                                    st.success(msg)
+                                    st.cache_data.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                        with col_nr:
+                            if st.button("❌ Anulează", key="confirm_restore_sel_no", use_container_width=True):
+                                st.session_state["confirm_restore_sel"] = False
+                                st.rerun()
+
+            # ---- Command History ----
+            st.markdown("#### 📋 Istoric comenzi (ultimele 10)")
+            history = get_curtail_history()
+            if history:
+                for cmd in history:
+                    action = cmd.get('action', '?').upper()
+                    status = cmd.get('status', '?')
+                    ts = cmd.get('created_at', '')[:16].replace('T', ' ')
+                    plants_list = cmd.get('plants', [])
+                    n_plants = len(plants_list) if isinstance(plants_list, list) else '?'
+                    icon = "🔴" if action == "CURTAIL" else "🟢"
+                    status_badge = "✅" if status in ("completed", "done") else ("⚠️" if status == "partial" else ("⏳" if status == "pending" else ("🔄" if status == "running" else "❌")))
+                    # Calculeaza durata comanda
+                    _created = cmd.get('created_at', '')
+                    _executed = cmd.get('executed_at', '')
+                    _duration_str = ""
+                    if _created and _executed:
+                        try:
+                            from datetime import datetime as _dt
+                            _t1 = _dt.fromisoformat(_created.replace('Z', '+00:00'))
+                            _t2 = _dt.fromisoformat(_executed.replace('Z', '+00:00'))
+                            _dur = int((_t2 - _t1).total_seconds())
+                            _min, _sec = divmod(_dur, 60)
+                            _duration_str = f" | ⏱ {_min}m {_sec}s" if _min else f" | ⏱ {_sec}s"
+                        except Exception:
+                            pass
+
+                    with st.expander(f"{icon} {action} — {ts} — {status_badge} {status} — {n_plants} centrale{_duration_str}"):
+                        results = cmd.get('result') or cmd.get('results')
+                        # Normalizează: poate fi list sau dict sau JSON string
+                        if isinstance(results, str):
+                            try:
+                                import json as _json
+                                results = _json.loads(results)
+                            except Exception:
+                                results = None
+
+                        if isinstance(results, list) and results:
+                            ok_plants    = [r for r in results if r.get('success')]
+                            skip_plants  = [r for r in results if r.get('status') == 'skipped']
+                            fail_plants  = [r for r in results if not r.get('success') and r.get('status') != 'skipped']
+                            if ok_plants:
+                                st.success(f"✅ Reușite ({len(ok_plants)}): " + ", ".join(r['plant'] for r in ok_plants))
+                            if skip_plants:
+                                st.warning(f"⏭️ Sărite ({len(skip_plants)}): " + ", ".join(r['plant'] for r in skip_plants))
+                            if fail_plants:
+                                st.error(f"❌ Eșuate ({len(fail_plants)}):")
+                                for r in fail_plants:
+                                    st.caption(f"  • **{r['plant']}** — {r.get('error', 'eroare necunoscută')}")
+                        elif isinstance(results, dict) and results:
+                            for plant, res in results.items():
+                                if not isinstance(res, dict):
+                                    st.caption(f"⚠️ **{plant}** — date incomplete")
+                                    continue
+                                ok_icon = "✅" if res.get('success') else "❌"
+                                err = res.get('error', '')
+                                st.caption(f"{ok_icon} **{plant}** {err}")
+                        else:
+                            # Nu avem rezultate încă (running/pending)
+                            if isinstance(plants_list, list) and plants_list:
+                                st.write(", ".join(plants_list))
+            else:
+                st.caption("Nicio comandă în baza de date.")
+
 
     # ============================
-    # TAB 3: SEN & PIATA
+    # TAB 3: SCHEDULE
     # ============================
     with tab3:
+        st.markdown("### 📅 Commander — Schedule Opriri/Porniri")
+
+        import json as _json
+        import datetime as _datetime_mod2
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+        _sb3 = create_client(SUPABASE_URL, SUPABASE_KEY)
+        _tz_ro = ZoneInfo("Europe/Bucharest")
+
+        ALL_PLANTS_SCHED = ALL_PLANTS  # D: single source of truth — definit in Tab 2
+
+        # ---- Helpers ----
+        def _load_schedule():
+            try:
+                r = _sb3.table("curtail_schedule") \
+                    .select("*") \
+                    .order("scheduled_start", desc=False) \
+                    .execute()
+                return r.data or []
+            except Exception as e:
+                st.error(f"Eroare incarcare schedule: {e}")
+                return []
+
+        def _status_badge(status):
+            badges = {
+                "scheduled":  ("🔵", "#1a2a3a", "#3498DB"),
+                "active":     ("🟠", "#3a2a0a", "#F5A623"),
+                "completed":  ("✅", "#0a2a1a", "#2ECC71"),
+                "cancelled":  ("❌", "#2a1a1a", "#888"),
+                "failed":     ("🔴", "#3a0a0a", "#E74C3C"),
+            }
+            icon, bg, color = badges.get(status, ("⚪", "#2a2a2a", "#aaa"))
+            return f'<span style="background:{bg};color:{color};border:0.5px solid {color}44;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500">{icon} {status}</span>'
+
+        # ---- Adauga programare ----
+        with st.expander("➕ Adaugă programare nouă", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                sel_plants = st.multiselect("Centrale", ALL_PLANTS_SCHED, key="sched_plants")
+                sel_kw = st.number_input("Setpoint % (0 = oprire completă, 100 = fără limitare)", min_value=0.0, max_value=100.0, value=0.0, step=5.0, key="sched_kw")
+                sel_notes = st.text_input("Note", key="sched_notes")
+            with col2:
+                today = _datetime_mod2.date.today()
+                sel_date = st.date_input("Data", value=today, key="sched_date")
+                col2a, col2b = st.columns(2)
+                with col2a:
+                    sel_start = st.time_input("Ora start", value=_datetime_mod2.time(10, 0), key="sched_start", step=300)
+                with col2b:
+                    sel_stop = st.time_input("Ora stop", value=_datetime_mod2.time(12, 0), key="sched_stop", step=300)
+                sel_notify = st.checkbox("Notifică client", value=True, key="sched_notify")
+
+            if st.button("💾 Salvează programare", type="primary", key="sched_save"):
+                if not sel_plants:
+                    st.error("Selectează cel puțin o centrală!")
+                else:
+                    _start_dt = _dt.combine(sel_date, sel_start, tzinfo=_tz_ro).astimezone(_tz.utc)
+                    _stop_dt  = _dt.combine(sel_date, sel_stop,  tzinfo=_tz_ro).astimezone(_tz.utc)
+                    _now_utc  = _dt.now(_tz.utc)
+                    if _start_dt < _now_utc:
+                        st.error(f"❌ Ora start ({sel_start} EET) e în trecut! Selectează o oră viitoare.")
+                    elif _stop_dt <= _start_dt:
+                        st.error("❌ Ora stop trebuie să fie după ora start!")
+                    else:
+                        try:
+                            _sb3.table("curtail_schedule").insert({
+                                "plants":           sel_plants,
+                                "plant_name":       ", ".join(sel_plants),
+                                "scheduled_start":  _start_dt.isoformat(),
+                                "scheduled_stop":   _stop_dt.isoformat(),
+                                "kw":               sel_kw,
+                                "notes":            sel_notes or None,
+                                "notify_client":    sel_notify,
+                                "created_by":       "admin",
+                                "status":           "scheduled",
+                            }).execute()
+                            st.success(f"✅ Programare salvată: {', '.join(sel_plants)} | {sel_start}–{sel_stop} EET")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Eroare: {e}")
+
+        st.divider()
+
+        # ---- Timeline programari ----
+        jobs = _load_schedule()
+        now_ro = _dt.now(_tz_ro)
+
+        # Filtre
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            filter_status = st.multiselect(
+                "Filtrare status",
+                ["scheduled", "active", "completed", "cancelled", "failed"],
+                default=["scheduled", "active"],
+                key="sched_filter"
+            )
+        with col_f2:
+            filter_days = st.selectbox("Perioadă", ["Azi", "7 zile", "30 zile", "Toate"], key="sched_days")
+
+        # Aplica filtre
+        filtered = []
+        for j in jobs:
+            if filter_status and j.get("status") not in filter_status:
+                continue
+            try:
+                j_start = _dt.fromisoformat(j["scheduled_start"].replace("Z", "+00:00")).astimezone(_tz_ro)
+                if filter_days == "Azi" and j_start.date() != now_ro.date():
+                    continue
+                elif filter_days == "7 zile" and (j_start - now_ro).days > 7:
+                    continue
+                elif filter_days == "30 zile" and (j_start - now_ro).days > 30:
+                    continue
+            except Exception:
+                pass
+            filtered.append(j)
+
+        if not filtered:
+            st.info("Nicio programare găsită pentru filtrele selectate.")
+        else:
+            st.markdown(f"**{len(filtered)} programări**")
+            for j in filtered:
+                try:
+                    j_start = _dt.fromisoformat(j["scheduled_start"].replace("Z", "+00:00")).astimezone(_tz_ro)
+                    j_stop  = _dt.fromisoformat(j["scheduled_stop"].replace("Z", "+00:00")).astimezone(_tz_ro)
+                except Exception:
+                    j_start = j_stop = None
+
+                plants_j = j.get("plants") or [j.get("plant_name", "?")]
+                if isinstance(plants_j, str):
+                    try:
+                        plants_j = _json.loads(plants_j)
+                    except Exception:
+                        plants_j = [plants_j]
+
+                kw_j = j.get("kw", 0)
+                action_label = f"0% (oprire completă)" if kw_j == 0 else f"{kw_j:.0f}%"
+
+                # Time remaining
+                time_info = ""
+                if j_start and j.get("status") == "scheduled":
+                    diff = j_start - now_ro
+                    if diff.total_seconds() > 0:
+                        mins = int(diff.total_seconds() / 60)
+                        if mins < 60:
+                            time_info = f"⏰ în {mins} min"
+                        else:
+                            hrs = mins // 60
+                            time_info = f"⏰ în {hrs}h {mins%60}min"
+                    else:
+                        time_info = "⚠️ întârziat"
+                elif j_start and j.get("status") == "active":
+                    diff = j_stop - now_ro if j_stop else None
+                    if diff and diff.total_seconds() > 0:
+                        mins = int(diff.total_seconds() / 60)
+                        time_info = f"🔴 activ · stop în {mins} min"
+                    else:
+                        time_info = "🔴 activ"
+
+                start_str = j_start.strftime("%d %b · %H:%M") if j_start else "?"
+                stop_str  = j_stop.strftime("%H:%M") if j_stop else "?"
+
+                with st.expander(
+                    f"{'🔴' if kw_j == 0 else '🟡'} {', '.join(plants_j[:2])}{'...' if len(plants_j) > 2 else ''} | {start_str} → {stop_str} | {j.get('status','?')} {time_info}",
+                    expanded=j.get("status") == "active"
+                ):
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.markdown(f"**Centrale** ({len(plants_j)})")
+                        for p in plants_j:
+                            st.caption(f"• {p}")
+                    with c2:
+                        st.markdown("**Detalii**")
+                        st.caption(f"Start: {start_str}")
+                        st.caption(f"Stop:  {stop_str}")
+                        st.caption(f"Setpoint: {action_label}")
+                        if j.get("notes"):
+                            st.caption(f"Note: {j['notes']}")
+                    with c3:
+                        st.markdown("**Acțiuni**")
+                        st.markdown(_status_badge(j.get("status", "?")), unsafe_allow_html=True)
+                        if j.get("status") in ("scheduled", "active"):
+                            if st.button("❌ Anulează", key=f"cancel_{j['id']}"):
+                                try:
+                                    _sb3.table("curtail_schedule").update({"status": "cancelled"}).eq("id", j["id"]).execute()
+                                    st.success("Anulat!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Eroare: {e}")
+                        if j.get("status") == "scheduled":
+                            if st.button("▶ Execută acum", key=f"exec_{j['id']}"):
+                                try:
+                                    plants_exec = j.get("plants") or [j.get("plant_name")]
+                                    if isinstance(plants_exec, str):
+                                        plants_exec = _json.loads(plants_exec)
+                                    _sb3.table("curtail_commands").insert({
+                                        "action": j.get("action_start", "curtail"),
+                                        "plants": plants_exec,
+                                        "kw":     float(j.get("kw", 0)),
+                                        "status": "pending",
+                                    }).execute()
+                                    _sb3.table("curtail_schedule").update({
+                                        "status": "active",
+                                        "actual_start": _dt.now(_tz.utc).isoformat(),
+                                    }).eq("id", j["id"]).execute()
+                                    st.success("✅ Comanda trimisă!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Eroare: {e}")
+
+    # ============================
+    # TAB 4: SEN & PIATA
+    # ============================
+    with tab4:
         sen_latest, sen_error, sen_rows = get_sen_realtime()
 
         if sen_error:
@@ -928,154 +1848,230 @@ def main():
 
 
     # ============================
-    # TAB 4: NOTIFICARI OPRIRE
+    # TAB 5: NOTIFICARI OPRIRE
     # ============================
-    with tab4:
-        st.markdown("### 📧 Trimitere Notificări Oprire")
+    with tab5:
+        st.markdown("### 📧 Notificări Oprire")
 
-        TEMPLATES = {
-            "1A — Solicitare RO (alivecapital style)": {
-                "subject": "{cef} - Solicitarea de limitare la autoconsum - {data}",
-                "body": """Buna ziua,
+        import requests as _req_mail
 
-Va rugam ca maine, {data}, sa ne ajutati cu implementare limitare de putere la autoconsum (injectie 0), intre orele {start} - {end}. Motivul este lipsa contract de vanzare PZU pe intervalele cu preturi 0 si negative.
-
-Va rugam sa confirmati primirea acestui email.
-
-Va multumesc anticipat."""
-            },
-            "1B — Solicitare RO (ivygrid style)": {
-                "subject": "{cef} - Solicitare consemn putere 0 injectie - {data}",
-                "body": """Buna ziua,
-
-Va rugam ca maine, {data}, sa ne ajutati cu implementare consemn de putere injectie 0, intre orele {start} - {end} EET. Motivul este lipsa contract de vanzare PZU pe intervalele cu preturi 0 si negative.
-
-Va rugam sa confirmati primirea acestui email.
-
-Multumim anticipat,
-Remus
-nextE"""
-            },
-            "2 — Notificare RO (noi inchidem)": {
-                "subject": "{cef} - Notificare limitare la autoconsum - {data} {start}-{end} EET",
-                "body": """Buna ziua,
-
-Va informam ca maine, {data}, {cef} va fi limitata la autoconsum (injectie 0), intre orele {start} - {end}. Motivul este lipsa contract de vanzare PZU pe intervalele cu preturi 0 si negative.
-
-Va rugam sa confirmati primirea acestui email.
-
-Va multumesc anticipat."""
-            },
-            "3 — Solicitare EN cu tabel (Photon style)": {
-                "subject": "Active power set to 0 - {data}",
-                "body": """Dear Team,
-
-Please help us with active power set to 0 at the PVP below due to negative prices from {start} to {end} tomorrow ({data}). We kindly ask a confirmation once this request is acknowledged.
-
-Depending on the market conditions tomorrow, we will notify you tomorrow morning as well if there will be any changes.
-
-PvPP: {cef}
-Curtailment Start: {start}
-Curtailment Stop: {end}
-
-Please confirm receipt of this email.
-
-Best Regards,
-Remus
-nextE"""
-            },
-            "4 — Solicitare informala RO (ADD Solar style)": {
-                "subject": "Oprire Parc {data} - {cef}",
-                "body": """Salut,
-
-Te rog sa ne ajuti cu oprirea parcului {cef} pentru maine, {data}, intre orele {start} - {end}. Motivul acestei opriri programate este legat de curba de preturi din DAM care maine este 0 si usor negativa in acest interval iar riscul de a produce este foarte mare din cauza costurilor cu dezechilibrele.
-
-Te rog sa confirmi primirea acestui email.
-
-Multumesc,
-Remus"""
-            },
-        }
-
-        SIGNATURE = """
-
-Best regards / Mit freundlichen Grüßen / Cu stima,
-Remus Colesniuc
-Energy Operations
-
-remus.colesniuc@mynexte.com
-RO: +40 799955098
-
-www.mynexte.com
-
-nextE Holding AG
-Kreuzbuchweg 2, Meggen, 6045, Luzern, Switzerland
-
-nextE Renewable SRL
-AFI Tech Park, 29A Tudor Vladimirescu Boulevard, 4th floor
-District 5, 050881, Bucharest, Romania"""
-
-        col_form, col_preview = st.columns([1, 1])
-
-        with col_form:
-            template_key = st.selectbox("Template", list(TEMPLATES.keys()))
-            cef_name     = st.text_input("Nume CEF", placeholder="ex: CEF Vrancart")
-            date_val     = st.date_input("Data oprire (ziua de maine)")
-            col_s, col_e = st.columns(2)
-            with col_s:
-                start_time = st.time_input("Ora start", value=None)
-            with col_e:
-                end_time   = st.time_input("Ora stop", value=None)
-            to_email     = st.text_input("To", value="daniel.husaru@mynexte.com")
-            cc_email     = st.text_input("CC", value="remus.colesniuc@mynexte.com")
-
-        tpl = TEMPLATES[template_key]
-        date_str  = date_val.strftime("%d.%m.%Y") if date_val else ""
-        start_str = start_time.strftime("%H:%M") if start_time else ""
-        end_str   = end_time.strftime("%H:%M") if end_time else ""
-
-        subject_preview = tpl["subject"].format(cef=cef_name, data=date_str, start=start_str, end=end_str)
-        body_preview    = tpl["body"].format(cef=cef_name, data=date_str, start=start_str, end=end_str) + SIGNATURE
-
-        with col_preview:
-            st.markdown("**Preview:**")
-            st.text(f"To: {to_email}")
-            st.text(f"CC: {cc_email}")
-            st.text(f"Subject: {subject_preview}")
-            st.markdown("---")
-            st.text(body_preview)
-
-        st.markdown("---")
-        if st.button("📤 Trimite Email", type="primary"):
+        @st.cache_data(ttl=300)
+        def load_email_templates():
             try:
-                import smtplib
-                from email.mime.text import MIMEText
-                from email.mime.multipart import MIMEMultipart
-
-                email_user = st.secrets["email"]["user"]
-                email_pass = st.secrets["email"]["password"]
-                smtp_host  = st.secrets["email"]["smtp_host"]
-                smtp_port  = int(st.secrets["email"]["smtp_port"])
-
-                msg = MIMEMultipart()
-                msg["From"]    = email_user
-                msg["To"]      = to_email
-                msg["CC"]      = cc_email
-                msg["Subject"] = subject_preview
-                msg.attach(MIMEText(body_preview, "plain", "utf-8"))
-
-                recipients = [e.strip() for e in (to_email + "," + cc_email).split(",") if e.strip()]
-
-                with smtplib.SMTP(smtp_host, smtp_port) as server:
-                    server.starttls()
-                    server.login(email_user, email_pass)
-                    server.sendmail(email_user, recipients, msg.as_string())
-
-                st.success(f"✅ Email trimis către {to_email}")
+                sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+                result = sb.table("email_templates") \
+                    .select("*").eq("is_active", True).order("sort_order").execute()
+                templates = {}
+                signature = ""
+                for row in (result.data or []):
+                    if row.get("type") == "signature":
+                        signature = row.get("body", "")
+                    else:
+                        templates[row["name"]] = {
+                            "subject": row.get("subject", ""),
+                            "body":    row.get("body", ""),
+                            "id":      row.get("id"),
+                        }
+                return templates, signature
             except Exception as e:
-                st.error(f"❌ Eroare trimitere email: {e}")
+                st.error(f"Eroare incarcare template-uri: {e}")
+                return {}, ""
 
-    render_forecast_tab(tab5)
+        @st.cache_data(ttl=300)
+        def load_plant_contacts():
+            try:
+                sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+                result = sb.table("plant_contacts").select("*").execute()
+                return {row["screen_name"]: row for row in (result.data or [])}
+            except Exception:
+                return {}
+
+        def send_graph_email(to_email, cc_email, subject, body):
+            try:
+                _client_id     = st.secrets["microsoft_graph"]["client_id"]
+                _tenant_id     = st.secrets["microsoft_graph"]["tenant_id"]
+                _client_secret = st.secrets["microsoft_graph"]["client_secret"]
+                _sender        = st.secrets["microsoft_graph"]["sender_email"]
+                _token_resp = _req_mail.post(
+                    f"https://login.microsoftonline.com/{_tenant_id}/oauth2/v2.0/token",
+                    data={"grant_type": "client_credentials", "client_id": _client_id,
+                          "client_secret": _client_secret, "scope": "https://graph.microsoft.com/.default"},
+                    timeout=15
+                )
+                _token_resp.raise_for_status()
+                _access_token = _token_resp.json().get("access_token")
+                if not _access_token:
+                    return False, "Nu am putut obtine token Graph"
+                _to_list = [{"emailAddress": {"address": e.strip()}} for e in to_email.split(",") if e.strip()]
+                _cc_list = [{"emailAddress": {"address": e.strip()}} for e in cc_email.split(",") if e.strip()]
+                _send_resp = _req_mail.post(
+                    f"https://graph.microsoft.com/v1.0/users/{_sender}/sendMail",
+                    headers={"Authorization": f"Bearer {_access_token}", "Content-Type": "application/json"},
+                    json={"message": {"subject": subject,
+                                      "body": {"contentType": "Text", "content": body},
+                                      "toRecipients": _to_list, "ccRecipients": _cc_list},
+                          "saveToSentItems": "true"},
+                    timeout=15,
+                )
+                if _send_resp.status_code == 202:
+                    return True, "Email trimis!"
+                return False, f"Graph API ({_send_resp.status_code}): {_send_resp.text[:200]}"
+            except Exception as e:
+                return False, str(e)
+
+        # ── Reload + Load ────────────────────────────────────────────────────
+        col_r, _ = st.columns([1, 5])
+        with col_r:
+            if st.button("🔄 Reincarca", key="reload_templates"):
+                st.cache_data.clear()
+                st.rerun()
+
+        TEMPLATES_DB, SIGNATURE = load_email_templates()
+        CONTACTS_DB = load_plant_contacts()
+
+        if not TEMPLATES_DB or not CONTACTS_DB:
+            st.warning("Nu exista template-uri sau contacte in Supabase.")
+        else:
+            # ── Parametri comuni ─────────────────────────────────────────────
+            st.markdown("#### Parametri comuni")
+            col_d, col_s, col_e = st.columns(3)
+            with col_d:
+                date_val   = st.date_input("Data oprire", key="notif_date")
+            with col_s:
+                start_time = st.time_input("Ora start", value=None, key="notif_start", step=300)
+            with col_e:
+                end_time   = st.time_input("Ora stop",  value=None, key="notif_end",   step=300)
+
+            date_str  = date_val.strftime("%d.%m.%Y") if date_val else ""
+            start_str = start_time.strftime("%H:%M") if start_time else ""
+            end_str   = end_time.strftime("%H:%M")   if end_time   else ""
+
+            st.markdown("---")
+
+            # ── Selectie centrale ─────────────────────────────────────────────
+            st.markdown("#### Centrale de notificat")
+            selected_cefs = st.multiselect(
+                "Selecteaza centralele",
+                options=sorted(CONTACTS_DB.keys()),
+                default=[],
+                key="notif_selected_cefs"
+            )
+
+            if not selected_cefs:
+                st.info("Selecteaza cel putin o centrala.")
+            else:
+                # ── Construieste emailurile per centrala ──────────────────────
+                emails = []
+                for cef in selected_cefs:
+                    contact  = CONTACTS_DB[cef]
+                    tpl_name = contact.get("default_template", list(TEMPLATES_DB.keys())[0])
+                    # Fallback daca template-ul nu mai exista
+                    if tpl_name not in TEMPLATES_DB:
+                        tpl_name = list(TEMPLATES_DB.keys())[0]
+                    tpl = TEMPLATES_DB[tpl_name]
+                    try:
+                        subject = tpl["subject"].format(cef=cef, data=date_str, start=start_str, end=end_str)
+                        body    = tpl["body"].format(cef=cef, data=date_str, start=start_str, end=end_str)
+                    except KeyError:
+                        subject = tpl["subject"]
+                        body    = tpl["body"]
+                    full_body = body + ("\n\n" + SIGNATURE if SIGNATURE else "")
+                    emails.append({
+                        "cef":      cef,
+                        "tpl_name": tpl_name,
+                        "to":       contact.get("to_email", ""),
+                        "cc":       contact.get("cc_email", ""),
+                        "subject":  subject,
+                        "body":     full_body,
+                        "tpl_id":   tpl.get("id"),
+                    })
+
+                # ── Preview si trimitere per centrala ─────────────────────────
+                st.markdown(f"**{len(emails)} email(uri) de trimis:**")
+
+                send_results = {}
+
+                for em in emails:
+                    _k = em["cef"].replace(" ", "_").replace("/", "_")
+                    with st.expander(f"📧 {em['cef']} → {em['to'][:40]}{'...' if len(em['to']) > 40 else ''}", expanded=True):
+                        col_l, col_r2 = st.columns([1, 1])
+                        with col_l:
+                            # Template override
+                            tpl_override = st.selectbox(
+                                "Template",
+                                options=list(TEMPLATES_DB.keys()),
+                                index=list(TEMPLATES_DB.keys()).index(em["tpl_name"]) if em["tpl_name"] in TEMPLATES_DB else 0,
+                                key=f"tpl_{_k}"
+                            )
+                            # Recalculeaza daca s-a schimbat template-ul
+                            if tpl_override != em["tpl_name"]:
+                                tpl2 = TEMPLATES_DB[tpl_override]
+                                try:
+                                    em["subject"] = tpl2["subject"].format(cef=em["cef"], data=date_str, start=start_str, end=end_str)
+                                    em["body"]    = tpl2["body"].format(cef=em["cef"], data=date_str, start=start_str, end=end_str) + ("\n\n" + SIGNATURE if SIGNATURE else "")
+                                except KeyError:
+                                    em["subject"] = tpl2["subject"]
+                                    em["body"]    = tpl2["body"]
+
+                            to_val = st.text_input("To",  value=em["to"], key=f"to_{_k}")
+                            cc_val = st.text_input("CC",  value=em["cc"], key=f"cc_{_k}")
+                            subj_val = st.text_input("Subject", value=em["subject"], key=f"subj_{_k}")
+
+                        with col_r2:
+                            st.markdown("**Preview body:**")
+                            st.text(em["body"][:800] + ("..." if len(em["body"]) > 800 else ""))
+
+                        if st.button(f"📤 Trimite catre {em['cef']}", key=f"send_{_k}"):
+                            with st.spinner("Se trimite..."):
+                                ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
+                            send_results[em["cef"]] = (ok, msg)
+                            if ok:
+                                st.success(f"✅ {msg}")
+                            else:
+                                st.error(f"❌ {msg}")
+
+                # ── Trimite toate ─────────────────────────────────────────────
+                st.markdown("---")
+                if st.button("📤 Trimite TOATE emailurile", type="primary", key="send_all"):
+                    all_ok = True
+                    for em in emails:
+                        _k = em["cef"].replace(" ", "_").replace("/", "_")
+                        to_val   = st.session_state.get(f"to_{_k}",   em["to"])
+                        cc_val   = st.session_state.get(f"cc_{_k}",   em["cc"])
+                        subj_val = st.session_state.get(f"subj_{_k}", em["subject"])
+                        with st.spinner(f"Trimit catre {em['cef']}..."):
+                            ok, msg = send_graph_email(to_val, cc_val, subj_val, em["body"])
+                        if ok:
+                            st.success(f"✅ {em['cef']}: {msg}")
+                        else:
+                            st.error(f"❌ {em['cef']}: {msg}")
+                            all_ok = False
+                    if all_ok:
+                        st.balloons()
+
+            # ── Editor template (expandabil) ──────────────────────────────────
+            st.markdown("---")
+            with st.expander("✏️ Editeaza template-uri", expanded=False):
+                tpl_edit_key = st.selectbox("Template de editat", list(TEMPLATES_DB.keys()), key="edit_tpl_sel")
+                tpl_edit = TEMPLATES_DB[tpl_edit_key]
+                edit_subject = st.text_input("Subject", value=tpl_edit["subject"], key="edit_subject")
+                edit_body    = st.text_area("Body",     value=tpl_edit["body"],    key="edit_body", height=300)
+                if st.button("💾 Salveaza", key="save_template"):
+                    try:
+                        sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+                        sb.table("email_templates").update({
+                            "subject":    edit_subject,
+                            "body":       edit_body,
+                            "updated_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+                        }).eq("id", tpl_edit["id"]).execute()
+                        st.success("✅ Template salvat!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Eroare salvare: {e}")
+
+
+
 
 
 # ============================================================================
