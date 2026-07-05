@@ -1391,93 +1391,76 @@ hr { border-color: #1e2330 !important; }
                 except Exception as e:
                     return []
 
-            def plant_to_listener(plant: str) -> str:
-                """Ruteaza planta catre listener-ul ei (coloana `listener` din curtail_commands)."""
-                m = PLANTS_METHOD.get(plant, "smartlogger")
-                if m == "goodwe_dalga":
-                    return "dalga"
-                if m == "united":
-                    return "united"
-                if m == "trecon":
-                    return {"Trecon": "trecon",
-                            "Foton Plus Urzica": "urzica",
-                            "IF - Saftica CEF 1 MW": "gcit"}.get(plant, "trecon")
-                return "fusion"
-
             def send_curtail_command(action: str, plants: list = None, pct: float = 0.0):
                 """
-                Trimite comanda curtail/restore in Supabase — UN RAND PER LISTENER.
-                Toate randurile se insereaza in acelasi click => pornire simultana.
+                Trimite comanda curtail/restore in Supabase.
                 pct: 0-100 (procent setpoint). 0 = oprire completa.
+                kw per planta calculat via pct_to_kw_app().
+                Plantele fara kw_max definit sunt sarite la curtail partial si restore.
                 """
                 try:
                     import uuid as _uuid
                     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    # Idempotency — verifica daca exista deja o comanda identica pending/running
+                    # in ultimele 60 secunde (double-click protection)
+                    recent = supabase.table("curtail_commands") \
+                        .select("id,created_at") \
+                        .eq("action", action) \
+                        .in_("status", ["pending", "running"]) \
+                        .order("created_at", desc=True) \
+                        .limit(1) \
+                        .execute()
+                    if recent.data:
+                        try:
+                            last_ts = datetime.fromisoformat(
+                                recent.data[0]["created_at"].replace("Z", "+00:00")
+                            )
+                            age_s = (datetime.now(ZoneInfo("UTC")) - last_ts).total_seconds()
+                            if age_s < 60:
+                                return False, f"⚠️ {action.upper()} command already in progress ({int(age_s)}s ago). Wait for completion."
+                        except Exception:
+                            pass
+
                     target_plants = plants if plants else ALL_PLANTS
 
-                    # Grupeaza plantele pe listener; kw calculat PER GRUP
-                    groups = {}
+                    # Calculeaza kw per planta si filtreaza plantele invalide
+                    valid_plants = []
+                    kw_send = 0.0  # kw pentru prima planta non-Trecon (listenerii folosesc acelasi kw)
                     skipped = []
                     for plant in target_plants:
                         kw_val = pct_to_kw_app(plant, pct, action)
                         if kw_val is None:
                             skipped.append(plant)
                             continue
-                        lst = plant_to_listener(plant)
-                        g = groups.setdefault(lst, {"plants": [], "kw": 0.0})
-                        g["plants"].append(plant)
-                        if PLANTS_METHOD.get(plant) not in ("trecon", "shared") and g["kw"] == 0.0 and kw_val > 0:
-                            g["kw"] = kw_val
+                        valid_plants.append(plant)
+                        # kw_send = valoarea non-Trecon, non-shared (shared calculeaza intern)
+                        if PLANTS_METHOD.get(plant) not in ("trecon", "shared") and kw_send == 0.0 and kw_val > 0:
+                            kw_send = kw_val
 
-                    if not groups:
+                    if not valid_plants:
                         return False, f"⚠️ No valid plants — all have kw_max undefined."
 
-                    # Idempotency per (action, listener) — double-click protection
-                    now_utc = datetime.now(ZoneInfo("UTC"))
-                    recent = supabase.table("curtail_commands") \
-                        .select("id,created_at,listener") \
-                        .eq("action", action) \
-                        .in_("status", ["pending", "running"]) \
-                        .order("created_at", desc=True) \
-                        .limit(20) \
-                        .execute()
-                    blocked = set()
-                    for r in (recent.data or []):
-                        try:
-                            age_s = (now_utc - datetime.fromisoformat(
-                                r["created_at"].replace("Z", "+00:00"))).total_seconds()
-                            if age_s < 60 and r.get("listener") in groups:
-                                blocked.add(r.get("listener"))
-                        except Exception:
-                            pass
-
-                    sent = []
-                    for lst, g in groups.items():
-                        if lst in blocked:
-                            skipped.append(f"{lst} ({action} in progress <60s)")
-                            continue
-                        payload = {
-                            "action":      action,
-                            "kw":          g["kw"],
-                            "plants":      g["plants"],
-                            "listener":    lst,
-                            "status":      "pending",
-                            "created_at":  now_utc.isoformat(),
-                            "command_uid": str(_uuid.uuid4()),
-                            # ── Audit trail ──────────────────────────────────────
-                            "created_by":  st.session_state.get("curtail_auth_user", "unknown"),
-                            "pct_setpoint": pct,
-                            "skipped_plants": None,
-                        }
-                        result = supabase.table("curtail_commands").insert(payload).execute()
-                        if result.data:
-                            sent.append(f"{lst}:`{str(result.data[0]['id'])[:8]}`")
-
-                    if not sent:
-                        return False, f"⚠️ Nicio comanda trimisa. Skipped: {', '.join(skipped)}"
-                    msg = f"Sent {len(sent)} command(s): " + ", ".join(sent)
                     if skipped:
-                        msg += f" | Skipped: {', '.join(skipped)}"
+                        # Nu blocam, doar informam — listenerii vor sari oricum
+                        pass
+
+                    payload = {
+                        "action":      action,
+                        "kw":          kw_send,
+                        "plants":      valid_plants,
+                        "status":      "pending",
+                        "created_at":  datetime.now(ZoneInfo("UTC")).isoformat(),
+                        "command_uid": str(_uuid.uuid4()),
+                        # ── Audit trail ──────────────────────────────────────
+                        "created_by":  st.session_state.get("curtail_auth_user", "unknown"),
+                        "pct_setpoint": pct,
+                        "skipped_plants": skipped if skipped else None,
+                    }
+                    result = supabase.table("curtail_commands").insert(payload).execute()
+                    cmd_id = result.data[0]["id"] if result.data else "?"
+                    msg = f"Command sent! ID: `{str(cmd_id)[:8]}`"
+                    if skipped:
+                        msg += f" | Skipped (no kw_max): {', '.join(skipped)}"
                     return True, msg
                 except Exception as e:
                     return False, f"Error: {str(e)}"
