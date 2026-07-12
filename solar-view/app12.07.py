@@ -649,19 +649,6 @@ INVERTER_CONFIG = {
 }
 
 
-def plant_to_listener(plant: str) -> str:
-    """Ruteaza planta catre listener-ul ei (coloana `listener` din curtail_commands)."""
-    m = PLANTS_METHOD.get(plant, "smartlogger")
-    if m == "goodwe_dalga":
-        return "dalga"
-    if m == "united":
-        return "united"
-    if m == "trecon":
-        return {"Trecon": "trecon", "Foton Plus Urzica": "urzica",
-                "IF - Saftica CEF 1 MW": "gcit"}.get(plant, "trecon")
-    return "fusion"
-
-
 def pct_to_kw_app(plant: str, pct: float, action: str):
     """
     Calculeaza kw de trimis in curtail_commands pentru o planta.
@@ -1977,28 +1964,17 @@ hr { border-color: #1e2330 !important; }
                                         else:
                                             import uuid as _uuid_exec
                                             _sb_exec = create_client(SUPABASE_URL, SUPABASE_KEY)
-                                            # UN RAND PER LISTENER (fix incident 12 iul: rand unic + claim atomic = doar 1 listener)
-                                            _groups_exec = {}
-                                            for _p in _valid_exec:
-                                                _kv2 = pct_to_kw_app(_p, _pct_exec, _action_exec)
-                                                _lst = plant_to_listener(_p)
-                                                _g = _groups_exec.setdefault(_lst, {"plants": [], "kw": 0.0})
-                                                _g["plants"].append(_p)
-                                                if PLANTS_METHOD.get(_p) not in ("trecon", "shared") and _g["kw"] == 0.0 and _kv2 and _kv2 > 0:
-                                                    _g["kw"] = _kv2
-                                            for _lst, _g in _groups_exec.items():
-                                                _sb_exec.table("curtail_commands").insert({
-                                                    "action":      _action_exec,
-                                                    "plants":      _g["plants"],
-                                                    "kw":          _g["kw"],
-                                                    "listener":    _lst,
-                                                    "status":      "pending",
-                                                    "created_at":  _dt.now(_tz.utc).isoformat(),
-                                                    "command_uid": str(_uuid_exec.uuid4()),
-                                                    "created_by":  st.session_state.get("curtail_auth_user", "unknown"),
-                                                    "pct_setpoint": _pct_exec,
-                                                    "skipped_plants": _skipped_exec or None,
-                                                }).execute()
+                                            _sb_exec.table("curtail_commands").insert({
+                                                "action":      _action_exec,
+                                                "plants":      _valid_exec,
+                                                "kw":          _kw_exec,
+                                                "status":      "pending",
+                                                "created_at":  _dt.now(_tz.utc).isoformat(),
+                                                "command_uid": str(_uuid_exec.uuid4()),
+                                                "created_by":  st.session_state.get("curtail_auth_user", "unknown"),
+                                                "pct_setpoint": _pct_exec,
+                                                "skipped_plants": _skipped_exec or None,
+                                            }).execute()
                                             _sb_exec.table("curtail_schedule").update({
                                                 "status":      "active",
                                                 "actual_start": _dt.now(_tz.utc).isoformat(),
@@ -2037,28 +2013,17 @@ hr { border-color: #1e2330 !important; }
                                         else:
                                             import uuid as _uuid_rest
                                             _sb_rest = create_client(SUPABASE_URL, SUPABASE_KEY)
-                                            # UN RAND PER LISTENER
-                                            _groups_rest = {}
-                                            for _p in _valid_rest:
-                                                _kv2 = pct_to_kw_app(_p, 100.0, "restore")
-                                                _lst = plant_to_listener(_p)
-                                                _g = _groups_rest.setdefault(_lst, {"plants": [], "kw": 0.0})
-                                                _g["plants"].append(_p)
-                                                if PLANTS_METHOD.get(_p) not in ("trecon", "shared") and _g["kw"] == 0.0 and _kv2 and _kv2 > 0:
-                                                    _g["kw"] = _kv2
-                                            for _lst, _g in _groups_rest.items():
-                                                _sb_rest.table("curtail_commands").insert({
-                                                    "action":       "restore",
-                                                    "plants":       _g["plants"],
-                                                    "kw":           _g["kw"],
-                                                    "listener":     _lst,
-                                                    "status":       "pending",
-                                                    "created_at":   _dt.now(_tz.utc).isoformat(),
-                                                    "command_uid":  str(_uuid_rest.uuid4()),
-                                                    "created_by":   st.session_state.get("curtail_auth_user", "unknown"),
-                                                    "pct_setpoint": 100.0,
-                                                    "skipped_plants": _skipped_rest or None,
-                                                }).execute()
+                                            _sb_rest.table("curtail_commands").insert({
+                                                "action":       "restore",
+                                                "plants":       _valid_rest,
+                                                "kw":           _kw_rest,
+                                                "status":       "pending",
+                                                "created_at":   _dt.now(_tz.utc).isoformat(),
+                                                "command_uid":  str(_uuid_rest.uuid4()),
+                                                "created_by":   st.session_state.get("curtail_auth_user", "unknown"),
+                                                "pct_setpoint": 100.0,
+                                                "skipped_plants": _skipped_rest or None,
+                                            }).execute()
                                             _sb_rest.table("curtail_schedule").update({
                                                 "status":     "completed",
                                                 "actual_stop": _dt.now(_tz.utc).isoformat(),
