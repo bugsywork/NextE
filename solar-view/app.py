@@ -2663,41 +2663,41 @@ hr { border-color: #1e2330 !important; }
 CHESHAM_PLANTS = ['Calafat 1', 'Calafat 2', 'Calafat 3']
 
 PARK_MAP = {
-    'Albesti': 'Beer_Albesti_PVPP',
-    'CEF BEER SOLAR': 'Beer_Baciului_PVPP',
-    'CEF Bacova': 'Arothreepower_PVPP',
+    'Ro_Ulmu_Fase2': 'Unirea_Green_Energy2_PVPP',
     'CEF ECORAY': 'Ecorai_Energy_PVPP',
     'CEF GIULIA SOLAR': 'GIULIA_PVPP',
-    'CEF KBO Sibiciu de sus': 'KBO_PVPP',
-    'CEF LUXUS': 'Luxus_Energy_PVPP',
-    'CEF POT Construct': 'POT_PVPP',
-    'CEF ADD SOLAR ENERGY': 'ADD_Solar_Energy _PVPP',
-    'CET Trecon': 'Trecon_PVPP',
-    'Calafat 1+2+3': 'Chesham_Solar_PVPP',
-    'Faget': 'Aldgate_Solar_PVPP',
-    'Faget 2': 'Brentford_Solar_PVPP',
-    'BOCSA': 'Kenton_Solar_PVPP',
     'FULVA 3125KW': 'FULVA_ENERGY_PVPP',
-    'Ghimpati': 'Sag_Fotovoltaice_PVPP',
-    'IF - Saftica CEF 1 MW': 'GCIT_PVPP',
     'KEK HAL 2100KW': 'KEK_HAL_PVPP',
-    'Magureni': 'Greenford_Solar_Magureni_PVPP',
-    'nextE_AM': 'RES_ENERGY_PVPP',
-    'Parc Chirileu Nou': 'Fomco_Chirileu_2_PVPP',
-    'Parc Chirileu Vechi': 'Fomco_Chirileu_PVPP',
     'Parc Fotovoltaic Codlea': 'Ecosol_Energie_PVPP',
-    'Preferato': 'Preferato_PVPP',
     'RAAL_PB_7.371MWp_6.02MW': 'RAAL_PVPP',
-    'Raimondenergy 1MW': 'RaimondEnergy_PVPP1',
-    'Ro_Ulmu_Fase2': 'Unirea_Green_Energy2_PVPP',
-    'Sangeorgiu de Mures': 'Fomco_Wood_PVPP',
-    'Sangeorgiu de Padure': 'Fomco_SANGEROIU_PVPP',
-    'Sarulesti': 'Greenford_Solar_Sarulesti_PVPP',
-    'Siria': 'Siria_Solar_PVPP',
-    'Skipass': 'Skipass_PVPP',
     'SunlightGreen': 'Sunlight_Green_PVPP',
     'TopAgro_PV+BESS': 'Topagro_PVPP',
+    'Albesti': 'Beer_Albesti_PVPP',
+    'Skipass': 'Skipass_PVPP',
+    'Preferato': 'Preferato_PVPP',
+    'Raimondenergy 1MW': 'RaimondEnergy_PVPP1',
+    'CEF KBO Sibiciu de sus': 'KBO_PVPP',
+    'nextE_AM': 'RES_ENERGY_PVPP',
+    'CEF LUXUS': 'Luxus_Energy_PVPP',
+    'Parc Chirileu Vechi': 'Fomco_Chirileu_PVPP',
+    'Parc Chirileu Nou': 'Fomco_Chirileu_2_PVPP',
+    'Sangeorgiu de Padure': 'Fomco_SANGEROIU_PVPP',
+    'Sangeorgiu de Mures': 'Fomco_Wood_PVPP',
+    'Ghimpati': 'Sag_Fotovoltaice_PVPP',
+    'CEF Bacova': 'Arothreepower_PVPP',
+    'CEF ADD SOLAR ENERGY': 'ADD_Solar_Energy _PVPP',
+    'IF - Saftica CEF 1 MW': 'GCIT_PVPP',
+    'CET Trecon': 'Trecon_PVPP',
+    'CEF POT Construct': 'POT_PVPP',
+    'CEF BEER SOLAR': 'Beer_Baciului_PVPP',
     'ULMU PV PLANT': 'Unirea_Green_Energy1_PVPP',
+    'Faget': 'Aldgate_Solar_PVPP',
+    'Faget 2': 'Brentford_Solar_PVPP',
+    'Calafat 1+2+3': 'Chesham_Solar_PVPP',
+    'BOCSA': 'Kenton_Solar_PVPP',
+    'Siria': 'Siria_Solar_PVPP',
+    'Magureni': 'Greenford_Solar_Magureni_PVPP',
+    'Sarulesti': 'Greenford_Solar_Sarulesti_PVPP',
 }
 
 UUID_MAP = {
@@ -2849,7 +2849,7 @@ def render_forecast_tab(tab):
 
         col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
-            park_options = ["🌍 All combined"] + sorted(PARK_MAP.keys())
+            park_options = ["🌍 All combined"] + list(PARK_MAP.keys())
             selected_park = st.selectbox("Plant", park_options, key="fva_park")
         with col2:
             date_from = st.date_input("From", value=today, key="fva_from")
