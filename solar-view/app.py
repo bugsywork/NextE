@@ -649,7 +649,7 @@ INVERTER_CONFIG = {
     "Albesti":                {"sets": [{"kw_per_inverter": 125.0}, {"kw_per_inverter": 44.0}]},
     "Skipass":                {"sets": [{"kw_per_inverter": 110.0}]},
     "Preferato":              {"sets": [{"kw_per_inverter": 215.0}]},
-    "Raimondenergy 1MW":      {"sets": [{"kw_per_inverter": 89.0}]},
+    "Raimondenergy 1MW":      {"sets": [{"kw_per_inverter": 100.0}]},
     "CEF KBO Sibiciu de sus": {"sets": [{"kw_per_inverter": 110.0}]},
     "En-Prest":               {"sets": [{"kw_per_inverter": 330.0}]},
 }
