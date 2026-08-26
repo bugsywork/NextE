@@ -585,7 +585,7 @@ ALL_PLANTS = [
     "KEK HAL 2100KW", "Parc Fotovoltaic Codlea",
     "SunlightGreen", "TopAgro_PV+BESS", "En-Prest", "Preferato",
     "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
-    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "IF - Saftica CEF 1 MW", "Trecon","Foton Plus Urzica", "CEF Dalga", "Albesti", "Skipass", "ML MV Green Energy", "CEF Ruseni", "RAAL_PB_7.371MWp_6.02MW", "CEF Miercurea Ciuc", "Catalina", "PROINTELIGENTA CRISTESTI 13", "DAMIANA Cristesti 12"
+    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "IF - Saftica CEF 1 MW", "Trecon","Foton Plus Urzica", "CEF Dalga", "Albesti", "Skipass", "ML MV Green Energy", "CEF Ruseni", "RAAL_PB_7.371MWp_6.02MW", "CEF Miercurea Ciuc", "Catalina"
      
 ]
 
@@ -616,8 +616,6 @@ PLANTS_METHOD = {
     "Foton Plus Urzica":       "trecon",
     "IF - Saftica CEF 1 MW":   "trecon",
     "Catalina":                  "smartlogger",
-    "PROINTELIGENTA CRISTESTI 13": "smartlogger",
-    "DAMIANA Cristesti 12":        "smartlogger",
 }
 
 # kw_max per planta — copie din inverter_config.py
@@ -638,8 +636,6 @@ INVERTER_KW_MAX = {
     "CEF Dalga":               896.1,
     "CEF Ruseni":              2000.0,
     "Catalina":                  4200.0,
-    "PROINTELIGENTA CRISTESTI 13": 540.0,
-    "DAMIANA Cristesti 12":        900.0,
 }
 
 # kw_per_inverter pentru shared plants — copie din inverter_config.py sets[0]
@@ -2685,7 +2681,6 @@ PARK_MAP = {
     'CEF LUXUS': 'Luxus_Energy_PVPP',
     'Parc Chirileu Vechi': 'Fomco_Chirileu_PVPP',
     'Parc Chirileu Nou': 'Fomco_Chirileu_2_PVPP',
-    'Parc Solar Cristesti': 'Fomco_Cristesti_PvPP',
     'Sangeorgiu de Padure': 'Fomco_SANGEROIU_PVPP',
     'Sangeorgiu de Mures': 'Fomco_Wood_PVPP',
     'Ghimpati': 'Sag_Fotovoltaice_PVPP',
@@ -2728,7 +2723,6 @@ UUID_MAP = {
     'RES_ENERGY_PVPP': '35f75389-7bfe-4f0e-acbe-edec3fbe2f2e',
     'Fomco_Chirileu_2_PVPP': 'e0e77e16-46af-4e0e-85f9-4900bd242ed9',
     'Fomco_Chirileu_PVPP': 'd94aa405-b156-4a56-b3ef-b39146f30459',
-    'Fomco_Cristesti_PvPP': 'ac710297-2a48-4f37-bd21-58682811a95a',
     'Ecosol_Energie_PVPP': '9fa336d9-3249-4445-9d23-c001e8413941',
     'Preferato_PVPP': '71c53318-60d0-4d2e-a108-dbdc24c8814b',
     'RAAL_PVPP': '2c3f59c8-6aa5-4168-b92f-0be2ffbffb62',
