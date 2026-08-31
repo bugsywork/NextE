@@ -585,7 +585,7 @@ ALL_PLANTS = [
     "KEK HAL 2100KW", "Parc Fotovoltaic Codlea",
     "SunlightGreen", "TopAgro_PV+BESS", "En-Prest", "Preferato",
     "Raimondenergy 1MW", "CEF KBO Sibiciu de sus",
-    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "IF - Saftica CEF 1 MW", "Trecon","Foton Plus Urzica", "CEF Dalga", "Albesti", "Skipass", "ML MV Green Energy", "CEF Ruseni", "RAAL_PB_7.371MWp_6.02MW", "CEF Miercurea Ciuc", "Catalina", "PROINTELIGENTA CRISTESTI 13", "DAMIANA Cristesti 12", "GDI Harvesting CEF Rogojeni"
+    "RES_ENERGY_PVPP", "Luxus_Energy_PVPP", "IF - Saftica CEF 1 MW", "Trecon","Foton Plus Urzica", "CEF Dalga", "Albesti", "Skipass", "ML MV Green Energy", "CEF Ruseni", "RAAL_PB_7.371MWp_6.02MW", "CEF Miercurea Ciuc", "Catalina", "PROINTELIGENTA CRISTESTI 13", "DAMIANA Cristesti 12", "GDI Harvesting CEF Rogojeni", "CEF. Unirea", "CEF Silistea"
      
 ]
 
@@ -619,6 +619,8 @@ PLANTS_METHOD = {
     "PROINTELIGENTA CRISTESTI 13": "smartlogger",
     "DAMIANA Cristesti 12":        "smartlogger",
     "GDI Harvesting CEF Rogojeni": "smartlogger",
+    "CEF. Unirea":                 "smartlogger",
+    "CEF Silistea":                "smartlogger",
 }
 
 # kw_max per planta — copie din inverter_config.py
@@ -642,6 +644,8 @@ INVERTER_KW_MAX = {
     "PROINTELIGENTA CRISTESTI 13": 540.0,
     "DAMIANA Cristesti 12":        900.0,
     "GDI Harvesting CEF Rogojeni": 500.0,
+    "CEF. Unirea":                 2916.0,
+    "CEF Silistea":                2916.0,
 }
 
 # kw_per_inverter pentru shared plants — copie din inverter_config.py sets[0]
