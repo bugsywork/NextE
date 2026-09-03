@@ -642,7 +642,7 @@ INVERTER_KW_MAX = {
     "CEF Ruseni":              2000.0,
     "Catalina":                  4200.0,
     "PROINTELIGENTA CRISTESTI 13": 900.0,
-    "DAMIANA Cristesti 12":        540.0,
+    "DAMIANA Cristesti 12":        900.0,
     "GDI Harvesting CEF Rogojeni": 500.0,
     "CEF. Unirea":                 2916.0,
     "CEF Silistea":                2916.0,
